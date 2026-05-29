@@ -1,0 +1,13 @@
+# Apple Silicon (M1/M2/M3/M4) TensorFlow stack
+# Install order matters!
+#
+#   pip install -r requirements_tf.txt
+#
+# tensorflow-macos: CPU+Metal-compatible TF build for Apple Silicon
+# tensorflow-metal: Metal GPU plugin (activates M4 GPU cores)
+# numpy + websocket-client: existing deps
+
+tensorflow-macos>=2.16.0
+tensorflow-metal>=1.1.0
+numpy>=1.24.0
+websocket-client>=1.7.0
