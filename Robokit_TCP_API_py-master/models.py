@@ -1,0 +1,118 @@
+"""Domain types shared by provider, dispatcher, and the WS layer."""
+from __future__ import annotations
+from dataclasses import dataclass, field, asdict
+from typing import Optional
+import time
+import itertools
+
+# Robot status (high level, what the operator sees)
+IDLE = "idle"
+ENROUTE_PICKUP = "enroute_pickup"
+AT_PICKUP = "at_pickup"
+ENROUTE_DROP = "enroute_drop"
+RETURNING = "returning"
+CHARGING = "charging"
+ERROR = "error"
+OFFLINE = "offline"
+
+# Task states
+T_PENDING = "pending"
+T_ASSIGNED = "assigned"
+T_ENROUTE_PICKUP = "enroute_pickup"
+T_AT_PICKUP = "at_pickup"
+T_ENROUTE_DROP = "enroute_drop"
+T_DONE = "done"
+T_CANCELLED = "cancelled"
+T_FAILED = "failed"
+
+# Callbutton states
+CB_IDLE = "idle"
+CB_CALLED = "called"
+CB_ACKED = "acknowledged"
+CB_SERVED = "served"
+
+
+@dataclass
+class Robot:
+    id: str
+    name: str
+    ip: str = ""
+    x: float = 50.0
+    y: float = 92.0
+    theta: float = 0.0
+    battery: float = 100.0
+    status: str = IDLE
+    nav: str = "idle"          # "moving" | "idle" — low-level motion state
+    goal_x: Optional[float] = None
+    goal_y: Optional[float] = None
+    goal_station: Optional[str] = None
+    current_task: Optional[str] = None
+    paused: bool = False
+    last_seen: float = field(default_factory=time.time)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class Station:
+    id: str
+    type: str
+    label: str
+    x: float
+    y: float
+    seer_lm: Optional[str] = None
+    ap_id: Optional[str] = None
+    opcua_node: Optional[str] = None
+    cb_state: str = CB_IDLE     # only meaningful for type == "callbutton"
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+_task_counter = itertools.count(1)
+
+
+@dataclass
+class Task:
+    id: str
+    pickup: str                 # station id (where the part is / call origin)
+    dropoff: str                # station id (destination)
+    state: str = T_PENDING
+    robot: Optional[str] = None
+    facility_id: str = "piracicaba"
+    created_at: float = field(default_factory=time.time)
+    assigned_at: Optional[float] = None
+    done_at: Optional[float] = None
+
+    @staticmethod
+    def new(pickup: str, dropoff: str, facility_id: str = "piracicaba") -> "Task":
+        return Task(id=f"T{next(_task_counter):04d}", pickup=pickup, dropoff=dropoff, facility_id=facility_id)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+# ── WebSocket message types ────────────────────────────────────────────────────
+# Server → client
+
+def world_snapshot(robots: list[Robot], stations: list[Station], tasks_active: list[Task]) -> dict:
+    return {
+        "type": "world",
+        "ts": time.time(),
+        "robots": [r.to_dict() for r in robots],
+        "stations": [s.to_dict() for s in stations],
+        "tasks_active": [t.to_dict() for t in tasks_active if t.state not in (T_DONE, T_CANCELLED, T_FAILED)],
+    }
+
+
+def task_update_msg(task: Task, event: str) -> dict:
+    return {"type": "task_update", "event": event, "task": task.to_dict()}
+
+
+def callbutton_msg(station: Station) -> dict:
+    return {"type": "callbutton", "station": station.to_dict()}
+
+
+def alarm_msg(level: str, message: str, robot_id: Optional[str] = None) -> dict:
+    return {"type": "alarm", "level": level, "message": message, "robot_id": robot_id, "ts": time.time()}
