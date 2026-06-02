@@ -22,19 +22,19 @@ import time
 from typing import Optional, Callable, Awaitable
 
 from . import config
+from .config import BATTERY_LOW_THRESHOLD
 from .models import (
     Robot, Station, Task,
     IDLE, ENROUTE_PICKUP, AT_PICKUP, ENROUTE_DROP, RETURNING, CHARGING, ERROR, OFFLINE,
     T_PENDING, T_ASSIGNED, T_ENROUTE_PICKUP, T_AT_PICKUP, T_ENROUTE_DROP, T_DONE,
-    T_CANCELLED, T_FAILED,
+    T_CANCELLED, T_FAILED, T_RECOVERING,
     CB_IDLE, CB_READY, CB_CALLED, CB_SERVED,
-    task_update_msg, callbutton_msg,
+    task_update_msg, callbutton_msg, alarm_msg,
 )
 from .provider import Provider
 
 log = logging.getLogger(__name__)
 
-BATTERY_LOW_THRESHOLD = 25.0   # % — route to charger when below this
 TICK_INTERVAL = 1.0 / config.TICK_HZ
 
 
@@ -47,6 +47,19 @@ class Dispatcher:
         self._tasks: dict[str, Task] = {}
         # Station lock: station_id → task_id currently being served
         self._station_lock: dict[str, str] = {}
+
+        # Recovery state: robot_id → monotonic-wall time until which the robot
+        # must not be reassigned to the task it just failed.
+        self._cooldown: dict[str, float] = {}
+        # Robots we've already raised an offline alarm for (one per transition).
+        self._offline_alarmed: set[str] = set()
+
+        # Optional soak-run telemetry state machine (owns cycle_id/step).
+        self.soak = None
+        if config.SOAK_MODE:
+            from .soak import SoakRunner
+            self.soak = SoakRunner(provider, self.stations)
+            log.info("dispatcher: SOAK_MODE on — soak robot=%s", self.soak.robot_id)
 
         # Broadcast callback set by the WS layer
         self._broadcast: Optional[Callable[[dict], Awaitable[None]]] = None
@@ -193,8 +206,11 @@ class Dispatcher:
             last = now
 
             self.provider.tick(dt)
+            if self.soak is not None:
+                self.soak.tick(dt)
             self._assign_pending()
             self._advance_active(dt)
+            self._check_recovery(dt)
             self._check_battery()
 
             await asyncio.sleep(TICK_INTERVAL)
@@ -220,6 +236,9 @@ class Dispatcher:
             pickup = self.stations[task.pickup]
             self.provider.goto(robot.id, pickup.x, pickup.y, task.pickup)
             task.state = T_ENROUTE_PICKUP
+            # Initialize stuck-detection progress trackers from the robot's pose.
+            task.last_x, task.last_y = robot.x, robot.y
+            task.last_progress_at = time.time()
             log.info("assigned %s → robot %s pickup=%s drop=%s", task.id, robot.id, task.pickup, task.dropoff)
             asyncio.ensure_future(self._emit(task_update_msg(task, "assigned")))
 
@@ -234,8 +253,16 @@ class Dispatcher:
                 continue
             if robot.current_task:
                 continue
+            if self.soak is not None and robot.id == self.soak.robot_id:
+                continue  # reserved for the soak loop — never hand it a task
             if robot.battery < BATTERY_LOW_THRESHOLD:
                 continue  # reserve for charging, handled separately
+            # Recovery filters: don't bounce the task back to the robot that just
+            # failed it (cooldown), and never assign to an unhealthy robot.
+            if robot.id == task.last_robot and time.time() < self._cooldown.get(robot.id, 0.0):
+                continue
+            if not self._robot_healthy(robot):
+                continue
             dist = math.hypot(robot.x - pickup.x, robot.y - pickup.y)
             cost = dist + max(0.0, 80.0 - robot.battery) * 0.5
             if cost < best_cost:
@@ -251,6 +278,11 @@ class Dispatcher:
                 continue
             robot = self.provider.robots.get(task.robot or "")
             if not robot:
+                continue
+
+            # A failed nav must NOT be read as an arrival. Recover first.
+            if self.provider.nav_failed(robot.id):
+                self._enter_recovery(task, robot, "nav_failed")
                 continue
 
             if task.state == T_ENROUTE_PICKUP:
@@ -292,6 +324,107 @@ class Dispatcher:
         if base:
             robot.status = RETURNING
             self.provider.goto(robot.id, base.x, base.y, base.id)
+
+    # ── Failure recovery ──────────────────────────────────────────────────────
+
+    def _robot_healthy(self, robot: Robot) -> bool:
+        try:
+            return bool(self.provider.healthy(robot.id))
+        except Exception:
+            return True  # provider can't tell → assume healthy, don't block dispatch
+
+    _RECOVERABLE = (T_ENROUTE_PICKUP, T_AT_PICKUP, T_ENROUTE_DROP)
+
+    def _check_recovery(self, dt: float) -> None:
+        """Evaluate failure signals on every in-flight task's assigned robot and
+        trigger recovery on the first one that fires."""
+        now = time.time()
+
+        # Bring offline robots back into service once they're healthy again
+        # (real HW: SeerProvider.tick also restores status; this covers sim).
+        for robot in self.provider.robots.values():
+            if robot.status == OFFLINE and not robot.current_task and self._robot_healthy(robot):
+                robot.status = IDLE
+                self._offline_alarmed.discard(robot.id)
+
+        for task in list(self._tasks.values()):
+            if task.state not in self._RECOVERABLE:
+                continue
+            robot = self.provider.robots.get(task.robot or "")
+            if not robot:
+                continue
+
+            # 1) Robot unhealthy / disconnected.
+            if not self._robot_healthy(robot):
+                if robot.id not in self._offline_alarmed:
+                    self._offline_alarmed.add(robot.id)
+                    asyncio.ensure_future(self._emit(
+                        alarm_msg("warn", f"robot {robot.id} offline", robot.id)))
+                self._enter_recovery(task, robot, "robot_offline")
+                continue
+
+            # Robot is healthy again → allow future offline alarms.
+            self._offline_alarmed.discard(robot.id)
+
+            # 2) Navigation failed.
+            if self.provider.nav_failed(robot.id):
+                self._enter_recovery(task, robot, "nav_failed")
+                continue
+
+            # 3) Stuck — no progress for too long (skip if it just arrived).
+            if not self.provider.arrived(robot.id):
+                moved = math.hypot(robot.x - (task.last_x or robot.x),
+                                   robot.y - (task.last_y or robot.y))
+                if moved >= config.PROGRESS_EPS:
+                    task.last_x, task.last_y = robot.x, robot.y
+                    task.last_progress_at = now
+                elif task.last_progress_at is not None and \
+                        (now - task.last_progress_at) > config.STUCK_TIMEOUT_S:
+                    self._enter_recovery(task, robot, "stuck")
+                    continue
+
+            # 4) Battery critical.
+            if robot.battery < config.BATTERY_CRITICAL:
+                self._enter_recovery(task, robot, "battery")
+                continue
+
+    def _enter_recovery(self, task: Task, robot: Robot, reason: str) -> None:
+        """Abort the task on this robot and either re-queue it or fail it."""
+        # NEVER command an offline robot — but a stop on a healthy one is safe.
+        if reason != "robot_offline":
+            self.provider.stop(robot.id)
+        robot.current_task = None
+        robot.status = OFFLINE if reason == "robot_offline" else IDLE
+        self._cooldown[robot.id] = time.time() + config.ROBOT_COOLDOWN_S
+        task.fail_reason = reason
+
+        asyncio.ensure_future(self._emit(task_update_msg(task, "recovering")))
+        asyncio.ensure_future(self._emit(
+            alarm_msg("warn", f"{task.id} recovering: {reason}", robot.id)))
+        log.warning("recovery: %s on robot %s — reason=%s", task.id, robot.id, reason)
+
+        if task.retries < config.MAX_TASK_RETRIES:
+            task.retries += 1
+            task.last_robot = robot.id
+            # Re-queue. Station lock is keyed on pickup and stays held until a
+            # terminal state, so the task keeps its slot.
+            task.robot = None
+            task.assigned_at = None
+            task.last_x = task.last_y = None
+            task.last_progress_at = None
+            task.state = T_PENDING
+            asyncio.ensure_future(self._emit(task_update_msg(task, "reassigning")))
+            log.info("recovery: %s re-queued (retry %d/%d)",
+                     task.id, task.retries, config.MAX_TASK_RETRIES)
+        else:
+            self._release_task(task, T_FAILED)
+            asyncio.ensure_future(self._emit(task_update_msg(task, "failed")))
+            asyncio.ensure_future(self._emit(
+                alarm_msg("critical",
+                          f"{task.id} failed after {task.retries} retries: {reason}",
+                          robot.id)))
+            log.error("recovery: %s FAILED after %d retries — reason=%s",
+                      task.id, task.retries, reason)
 
     # ── Battery management ────────────────────────────────────────────────────
 
