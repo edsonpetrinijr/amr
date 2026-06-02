@@ -136,3 +136,30 @@ class SeerProvider:
         if conn is None:
             return False
         return conn.set_do(do_id, status)
+
+    def raw_state(self, robot_id: str) -> dict:
+        """Rich per-tick fields straight from the RobotConn poll thread snapshot.
+        confidence / blocked / lift DI/DO are opportunistic — they are only
+        populated if the SEER replies actually carry them (see robot_conn)."""
+        conn = self._conns.get(robot_id)
+        if conn is None:
+            return {}
+        s = conn.state.snapshot()
+        return {
+            "connected": s.get("connected", False),
+            "task_status": s.get("task_status", 0),
+            "target_id": s.get("target_id", ""),
+            "vx": s.get("vx"), "vy": s.get("vy"), "w": s.get("w"),
+            "confidence": s.get("confidence"),
+            "blocked": s.get("blocked", False),
+            "last_seen": s.get("last_seen", time.time()),
+        }
+
+    # ── Recovery signals (real HW) ────────────────────────────────────────
+    def nav_failed(self, robot_id: str) -> bool:
+        return self.raw_state(robot_id).get("task_status") == TASK_FAILED
+
+    def healthy(self, robot_id: str) -> bool:
+        rs = self.raw_state(robot_id)
+        return bool(rs.get("connected")) and \
+            (time.time() - rs.get("last_seen", 0.0)) < config.ROBOT_STALE_S

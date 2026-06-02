@@ -24,6 +24,7 @@ T_ENROUTE_DROP = "enroute_drop"
 T_DONE = "done"
 T_CANCELLED = "cancelled"
 T_FAILED = "failed"
+T_RECOVERING = "recovering"
 
 # Callbutton states
 CB_IDLE   = "idle"
@@ -85,6 +86,13 @@ class Task:
     created_at: float = field(default_factory=time.time)
     assigned_at: Optional[float] = None
     done_at: Optional[float] = None
+    # ── Failure-recovery bookkeeping ──────────────────────────────────────
+    retries: int = 0
+    last_robot: Optional[str] = None          # robot that last failed this task (cooldown key)
+    last_progress_at: Optional[float] = None   # wall time of last measured progress
+    last_x: Optional[float] = None             # robot pose at last progress check
+    last_y: Optional[float] = None
+    fail_reason: Optional[str] = None          # nav_failed | robot_offline | stuck | battery
 
     @staticmethod
     def new(pickup: str, dropoff: str, facility_id: str = "piracicaba") -> "Task":

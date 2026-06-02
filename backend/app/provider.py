@@ -20,6 +20,16 @@ class Provider:
     def stop(self, robot_id: str) -> None: ...
     def tick(self, dt: float) -> None: ...
     def arrived(self, robot_id: str) -> bool: ...
+    def raw_state(self, robot_id: str) -> dict: ...
+
+    # ── Recovery signals (thin views over raw_state) ──────────────────────
+    def nav_failed(self, robot_id: str) -> bool:
+        return self.raw_state(robot_id).get("task_status") == 4
+
+    def healthy(self, robot_id: str) -> bool:
+        rs = self.raw_state(robot_id)
+        return bool(rs.get("connected")) and \
+            (time.time() - rs.get("last_seen", 0.0)) < config.ROBOT_STALE_S
 
 
 class SimProvider(Provider):
@@ -32,6 +42,9 @@ class SimProvider(Provider):
             r["id"]: Robot(id=r["id"], name=r["name"], ip=r.get("ip", ""), x=bx, y=by)
             for r in config.ROBOTS
         }
+        # SIM-ONLY recovery test hooks (absent on SeerProvider).
+        self._force_unhealthy: dict[str, bool] = {}
+        self._force_nav_fail: set[str] = set()
 
     def goto(self, robot_id: str, x: float, y: float, station: Optional[str]) -> None:
         r = self.robots[robot_id]
@@ -43,9 +56,58 @@ class SimProvider(Provider):
         r = self.robots[robot_id]
         r.goal_x = r.goal_y = r.goal_station = None
         r.nav = "idle"
+        self._force_nav_fail.discard(robot_id)  # nav failure acknowledged
 
     def arrived(self, robot_id: str) -> bool:
         return self.robots[robot_id].nav == "idle"
+
+    def raw_state(self, robot_id: str) -> dict:
+        """Rich per-tick fields for telemetry. The sim has no real localization
+        confidence / obstacle sensing, so those are None/False (TODO real HW).
+        task_status is synthesized as a RAW SEER int (1=running, 3=finished,
+        4=failed when a sim test forces a nav failure)."""
+        r = self.robots[robot_id]
+        moving = r.nav == "moving" and not r.paused and r.goal_x is not None
+        connected = not self._force_unhealthy.get(robot_id, False)
+        if robot_id in self._force_nav_fail:
+            task_status = 4
+        else:
+            task_status = 1 if moving else 3
+        return {
+            "connected": connected,
+            "task_status": task_status,
+            "target_id": r.goal_station or "",
+            "vx": None, "vy": None, "w": None,   # sim tracks no velocity; sampler derives it
+            "confidence": None,                  # TODO(real HW): SEER loc confidence
+            "blocked": False,                    # TODO(real HW): SEER obstacle flag
+            "last_seen": r.last_seen,
+        }
+
+    # ── Recovery signals ──────────────────────────────────────────────────
+    def nav_failed(self, robot_id: str) -> bool:
+        return robot_id in self._force_nav_fail
+
+    def healthy(self, robot_id: str) -> bool:
+        """Sim robots are always healthy unless a test forces them offline."""
+        return not self._force_unhealthy.get(robot_id, False)
+
+    # ── SIM-ONLY test hooks (no-op equivalents absent on SeerProvider) ─────
+    def force_unhealthy(self, robot_id: str, value: bool = True) -> None:
+        """Make healthy() False AND raw_state connected False."""
+        self._force_unhealthy[robot_id] = bool(value)
+
+    def force_nav_fail(self, robot_id: str) -> None:
+        """Make the next raw_state report task_status == 4 (FAILED)."""
+        self._force_nav_fail.add(robot_id)
+
+    def clear_nav_fail(self, robot_id: str) -> None:
+        self._force_nav_fail.discard(robot_id)
+
+    def force_stall(self, robot_id: str) -> None:
+        """Pause the robot so its position stops changing (reuses sim 'paused')."""
+        r = self.robots.get(robot_id)
+        if r is not None:
+            r.paused = True
 
     def tick(self, dt: float) -> None:
         step = config.ROBOT_SPEED * dt
