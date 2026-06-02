@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useReducer, useRef } from 'react'
+import React, { createContext, useContext, useEffect, useReducer } from 'react'
 import { startFleetSSE, stopFleetSSE, onFleetMsg, fleetApi } from '../api/fleet'
 import type { Robot, Station, Task, MapModel, AlarmMsg } from '../api/types'
 
@@ -65,11 +65,11 @@ function reducer(state: FleetState, action: Action): FleetState {
 // ── Context ───────────────────────────────────────────────────────────────────
 
 const FleetCtx = createContext<FleetState>(initial)
+// eslint-disable-next-line react-refresh/only-export-components
 export const useFleet = () => useContext(FleetCtx)
 
 export function FleetProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initial)
-  const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     // Load full task history once on mount

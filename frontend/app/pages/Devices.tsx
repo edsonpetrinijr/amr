@@ -3,7 +3,7 @@ import { Cpu, Bot, MapPin, Bell, Zap, RefreshCw } from 'lucide-react'
 import { useFleet } from '../state/store'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
-import type { Robot, Station } from '../api/types'
+
 
 // ── Robot tab ─────────────────────────────────────────────────────────────────
 
@@ -13,7 +13,8 @@ function RobotsTab() {
   const battColor = (b: number) =>
     b < 25 ? 'text-red-400' : b < 50 ? 'text-yellow-400' : 'text-green-400'
 
-  const STATUS_V: Record<string, any> = {
+  type BadgeVariant = 'default' | 'outline' | 'success' | 'destructive' | 'secondary'
+  const STATUS_V: Record<string, BadgeVariant> = {
     idle: 'outline', charging: 'secondary', error: 'destructive',
     offline: 'destructive', enroute_pickup: 'default', enroute_drop: 'default',
     at_pickup: 'secondary', returning: 'secondary',
@@ -61,7 +62,7 @@ const TYPE_ICON: Record<string, React.ReactNode> = {
   ap:         <MapPin className="w-3.5 h-3.5" />,
 }
 
-const CB_V: Record<string, any> = {
+const CB_V: Record<string, 'default' | 'outline' | 'success' | 'destructive' | 'secondary'> = {
   idle: 'outline', called: 'default', acknowledged: 'secondary', served: 'success',
 }
 
@@ -94,7 +95,7 @@ function StationsTab({ type }: { type: 'callbutton' | 'base' | 'ap' }) {
               <td className="px-4 py-2">
                 {type === 'callbutton'
                   ? <Badge variant={CB_V[s.cb_state] ?? 'outline'}>{s.cb_state}</Badge>
-                  : <span className="text-[#8b949e] capitalize">{s.type}</span>
+                : <span className="flex items-center gap-1 text-[#8b949e]">{TYPE_ICON[s.type]}<span className="capitalize">{s.type}</span></span>
                 }
               </td>
             </tr>

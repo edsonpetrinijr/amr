@@ -35,6 +35,7 @@ Button.displayName = "Button"
 
 /** Class-string helper used by shadcn primitives (e.g. AlertDialog action/cancel)
  *  that style a plain element as a button. Mirrors the Button variants above. */
+// eslint-disable-next-line react-refresh/only-export-components
 export function buttonVariants(opts?: { variant?: ButtonProps["variant"]; size?: ButtonProps["size"] }): string {
   const variant = opts?.variant ?? "default"
   const size = opts?.size ?? "default"

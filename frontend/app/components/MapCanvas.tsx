@@ -13,7 +13,7 @@
  *   selectedId   — highlight a robot or station id
  */
 import React, { useMemo, useRef, useState, useCallback, useEffect } from 'react'
-import type { MapModel, Robot, Station, Pos2D, Route } from '../api/types'
+import type { MapModel, Robot, Station } from '../api/types'
 
 interface Props {
   map: MapModel

@@ -7,7 +7,7 @@ import type {
   StatsSummary, RobotTelemetry, TasksHistory,
 } from './types'
 
-const BASE = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_FLEET_URL) ?? 'http://localhost:8765'
+const BASE: string = import.meta.env?.VITE_FLEET_URL ?? 'http://localhost:8765'
 
 /** Configured backend base URL — for callers that need raw fetch (e.g. /setdo). */
 export function fleetBaseUrl(): string {
@@ -86,10 +86,10 @@ async function _jsonOrError(path: string, opts?: RequestInit) {
     headers: { 'Content-Type': 'application/json' },
     ...opts,
   })
-  let body: any = null
+  let body: unknown = null
   try { body = await r.json() } catch { /* no/invalid JSON body */ }
   if (!r.ok) {
-    const msg = (body && (body.error || body.message)) || `${opts?.method ?? 'GET'} ${path} → ${r.status}`
+    const msg = (body && typeof body === 'object' && ('error' in body || 'message' in body) ? ((body as Record<string,string>).error || (body as Record<string,string>).message) : null) || `${opts?.method ?? 'GET'} ${path} → ${r.status}`
     throw new FleetApiError(r.status, msg)
   }
   return body

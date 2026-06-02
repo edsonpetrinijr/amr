@@ -2,7 +2,7 @@
 import { Truck, RotateCcw } from 'lucide-react'
 import { useFleet } from '../state/store'
 import { fleetApi } from '../api/fleet'
-import type { Station } from '../api/types'
+import type { Station, Task } from '../api/types'
 
 const SUPPLIER = 'AP1'
 const CONSUMER = 'CB1'
@@ -14,7 +14,7 @@ function DirectionRow({ dir, label, supplier, consumer, task, onPress, pressing 
   label: string
   supplier: Station | undefined
   consumer: Station | undefined
-  task: any
+  task: Task | null | undefined
   onPress: (id: string, d: 'fwd' | 'ret') => void
   pressing: string | null
 }) {

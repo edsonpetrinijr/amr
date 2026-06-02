@@ -52,7 +52,7 @@ function TaskRow({ task, onCancel }: { task: Task; onCancel?: (id: string) => vo
 }
 
 export function Tasks() {
-  const { allTasks, stations, robots, connected } = useFleet()
+  const { allTasks, stations, connected } = useFleet()
   const [showForm, setShowForm] = useState(false)
   const [pickup,   setPickup]   = useState('')
   const [dropoff,  setDropoff]  = useState('')

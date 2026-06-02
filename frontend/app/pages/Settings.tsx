@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Settings, Save, RefreshCw, AlertTriangle, CheckCircle, Wifi, WifiOff } from 'lucide-react'
+import { Settings, Save, AlertTriangle, CheckCircle, Wifi, WifiOff } from 'lucide-react'
 import { useFleet } from '../state/store'
 import { Button } from '../components/ui/button'
 import { Badge } from '../components/ui/badge'
