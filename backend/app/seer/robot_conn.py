@@ -50,6 +50,10 @@ class RobotState:
     task_status: int   = 0
     target_id:   str   = ""
     connected:   bool  = False
+    # Opportunistic diagnostics — only set if the SEER firmware exposes them.
+    # TODO(real HW): confirm exact field names against the unit's API replies.
+    confidence:  Optional[float] = None   # localization confidence / reloc score
+    blocked:     bool  = False            # obstacle/blocked flag
     last_seen:   float = field(default_factory=time.time)
     _lock:       threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
@@ -177,11 +181,26 @@ class RobotConn:
             sock.sendall(pack_msg(self._next_seq(), robot_status_info_req, {}))
             info = _recv_reply(sock)  # None is tolerated here
 
+            sock.sendall(pack_msg(self._next_seq(), robot_status_speed_req, {}))
+            speed = _recv_reply(sock)  # None tolerated
+
             updates: dict = {}
             if loc:
                 updates.update(x=loc.get('x', self.state.x),
                                 y=loc.get('y', self.state.y),
                                 theta=loc.get('angle', self.state.theta))
+                # Opportunistic: SEER loc may carry a localization confidence /
+                # reloc score and an obstacle/blocked flag. Keep last-known if absent.
+                conf = loc.get('confidence', loc.get('reloc_status'))
+                if conf is not None:
+                    updates['confidence'] = conf
+                blk = loc.get('blocked')
+                if blk is not None:
+                    updates['blocked'] = bool(blk)
+            if speed:
+                updates.update(vx=speed.get('vx', self.state.vx),
+                                vy=speed.get('vy', self.state.vy),
+                                w=speed.get('w', self.state.w))
             if task:
                 updates.update(task_status=task.get('task_status', self.state.task_status),
                                 target_id=task.get('target_id', self.state.target_id) or '')
@@ -231,8 +250,10 @@ class RobotConn:
         return reply is not None
 
     def arrived(self) -> bool:
-        """True when the robot has finished navigating to its last target."""
-        return self.state.task_status in (TASK_FINISHED, TASK_FAILED)
+        """True ONLY when the robot has SUCCESSFULLY finished navigating to its
+        last target (TASK_FINISHED == 3). A FAILED nav (4) is NOT an arrival —
+        recovery handles it via navigation_failed()."""
+        return self.state.task_status == TASK_FINISHED
 
     def navigation_failed(self) -> bool:
         return self.state.task_status == TASK_FAILED
