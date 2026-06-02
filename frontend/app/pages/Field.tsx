@@ -1,5 +1,5 @@
-import React, { useState } from 'react'
-import { Map } from 'lucide-react'
+import React, { useEffect, useRef, useState } from 'react'
+import { Map, Radar } from 'lucide-react'
 import { useFleet } from '../state/store'
 import { fleetApi } from '../api/fleet'
 import { MapCanvas } from '../components/MapCanvas'
@@ -141,6 +141,30 @@ export function Field() {
   const [selectedRobot, setSelectedRobot]     = useState<Robot | null>(null)
   const [selectedStation, setSelectedStation] = useState<Station | null>(null)
 
+  // ── Laser layer (dedicated PULL endpoint, polled ~2.5 Hz while ON) ──────────
+  const [laserOn, setLaserOn]       = useState(false)
+  const [laserBeams, setLaserBeams] = useState<[number, number][]>([])
+  // Refs keep the poller reading the latest selection/robots without re-arming
+  // the interval on every 10 Hz SSE world frame.
+  const robotsRef = useRef(robots);            robotsRef.current = robots
+  const selectedRef = useRef(selectedRobot);   selectedRef.current = selectedRobot
+
+  useEffect(() => {
+    if (!laserOn) { setLaserBeams([]); return }
+    let cancelled = false
+    async function poll() {
+      const sel = selectedRef.current
+      const ids = sel ? [sel.id] : robotsRef.current.map(r => r.id)
+      try {
+        const scans = await Promise.all(ids.map(id => fleetApi.getLaser(id)))
+        if (!cancelled) setLaserBeams(scans.flatMap(s => s.beams))
+      } catch { /* transient — keep last scan */ }
+    }
+    poll()
+    const t = setInterval(poll, 400)   // ~2.5 Hz
+    return () => { cancelled = true; clearInterval(t) }
+  }, [laserOn])
+
   function selectRobot(r: Robot) {
     setSelectedStation(null)
     setSelectedRobot(prev => prev?.id === r.id ? null : r)
@@ -162,6 +186,12 @@ export function Field() {
         <div className={`w-2 h-2 rounded-full ml-2 ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
         <span className="text-xs text-[#8b949e]">{connected ? 'Live' : 'Disconnected'}</span>
         <div className="ml-auto flex items-center gap-2 text-xs text-[#8b949e]">
+          <button onClick={() => setLaserOn(v => !v)}
+            className={`flex items-center gap-1.5 px-2 py-1 rounded border transition-colors
+              ${laserOn ? 'border-[#f0883e] text-[#f0883e] bg-[#f0883e]/10' : 'border-[#30363d] hover:bg-[#161b22]'}`}>
+            <Radar className="w-3.5 h-3.5" />
+            Laser
+          </button>
           <span>{robots.length} robots</span>
           <span>·</span>
           <span>{stations.length} stations</span>
@@ -173,6 +203,7 @@ export function Field() {
         <div className="flex-1 overflow-hidden">
           {map ? (
             <MapCanvas map={map} robots={robots} stations={stations}
+              laser={laserOn ? { beams: laserBeams, ts: 0 } : undefined}
               selectedId={selectedId}
               onClickRobot={selectRobot}
               onClickAP={selectStation}

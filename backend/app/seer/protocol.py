@@ -29,6 +29,7 @@ robot_status_run_req     = 1002  # Run mode
 robot_status_mode_req    = 1003  # Drive mode
 robot_status_loc_req     = 1004  # Pose → {x, y, angle}
 robot_status_speed_req   = 1005  # Velocity → {vx, vy, w}
+robot_status_laser_req   = 1009  # Laser scan → {laser_beams:[[x,y],…]} (world/map frame)
 robot_status_area_req    = 1011  # Areas → {area_ids:[…]}
 robot_status_task_req    = 1020  # Task state → {task_status, target_id}
 robot_status_alarm_res   = 1050  # Alarms

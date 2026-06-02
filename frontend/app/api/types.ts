@@ -17,6 +17,12 @@ export interface Area {
 
 export interface Landmark { id: string; x: number; y: number }
 
+/** GET /robots/<id>/laser — beams are WORLD/MAP-frame [x, y] metres (protocol
+ *  PDF p.24). The canvas draws them directly via tx/ty with no pose composition.
+ *  NOTE(real HW): if a real unit returns robot-relative/angle-distance instead,
+ *  this no-transform contract breaks — confirm on first real-robot test. */
+export interface LaserScan { beams: [number, number][]; ts: number }
+
 export interface Route {
   id: string
   start_id: string; end_id: string

@@ -16,6 +16,27 @@ from . import config
 from .models import Robot
 
 
+# ── Synthetic LiDAR (sim) ──────────────────────────────────────────────────────
+LASER_MAX_RANGE_M = 10.0    # clamp range — points beyond this return nothing
+LASER_NUM_RAYS    = 180     # rays cast around the robot (2° resolution)
+LASER_NOISE_M     = 0.02    # deterministic per-hit range noise (via self._rng)
+
+
+def _ray_segment_t(ox: float, oy: float, dx: float, dy: float,
+                   ax: float, ay: float, bx: float, by: float) -> Optional[float]:
+    """Distance `t >= 0` from ray origin (ox,oy) dir (dx,dy unit) to its first
+    intersection with segment A(ax,ay)→B(bx,by), or None if it misses."""
+    ex, ey = bx - ax, by - ay
+    det = -dx * ey + ex * dy
+    if abs(det) < 1e-12:        # ray parallel to segment
+        return None
+    t = (-(ax - ox) * ey + ex * (ay - oy)) / det
+    u = (dx * (ay - oy) - (ax - ox) * dy) / det
+    if t >= 0.0 and 0.0 <= u <= 1.0:
+        return t
+    return None
+
+
 class LocMode(str, Enum):
     """Localization quality, mirroring how a SEER robot degrades on a real floor."""
     OK = "ok"
@@ -50,6 +71,10 @@ class Provider:
     def tick(self, dt: float) -> None: ...
     def arrived(self, robot_id: str) -> bool: ...
     def raw_state(self, robot_id: str) -> dict: ...
+
+    def laser(self, robot_id: str) -> dict:
+        """World-frame laser scan {"beams": [[x,y],…], "ts": float}. Default empty."""
+        return {"beams": [], "ts": time.time()}
 
     # ── Recovery signals (thin views over raw_state) ──────────────────────
     def nav_failed(self, robot_id: str) -> bool:
@@ -88,6 +113,15 @@ class SimProvider(Provider):
         # tick() until cleared by stop(). Lets the Calibration page actually move
         # the sim robot, mirroring SeerProvider.send_velocity on real HW.
         self._manual_vel: dict[str, tuple[float, float, float]] = {}
+
+        # Map wall segments [((ax,ay),(bx,by)), …] for synthetic laser ray-casts.
+        # Populated by set_walls() once the .smap is loaded (see main._startup).
+        self._walls: list[tuple[tuple[float, float], tuple[float, float]]] = []
+
+    def set_walls(self, walls: list[tuple[tuple[float, float], tuple[float, float]]]) -> None:
+        """Load map wall segments used by the synthetic laser. Each entry is
+        ((ax,ay),(bx,by)) in world metres — same frame as est_pose."""
+        self._walls = list(walls)
 
     def goto(self, robot_id: str, x: float, y: float, station: Optional[str]) -> None:
         r = self.robots[robot_id]
@@ -145,10 +179,38 @@ class SimProvider(Provider):
             "last_seen": r.last_seen,
         }
 
+    def laser(self, robot_id: str) -> dict:
+        """Synthesize a believable world-frame laser scan from the ESTIMATED pose
+        (est_pose — same frame raw_state reports, NOT ground truth). Casts
+        LASER_NUM_RAYS rays around the robot, intersects map walls, clamps to
+        LASER_MAX_RANGE_M, and returns hits as world [x, y] with small
+        deterministic noise. A ray with no wall within range returns nothing —
+        mirroring a real scanner. NOTE(real HW): the protocol PDF (p.24) says a
+        real unit emits beams already in the WORLD/MAP frame, so the frontend
+        draws these directly with no pose composition; if a real unit returns
+        robot-relative/angle-distance, fix here AND the frontend render site."""
+        loc = self._loc.get(robot_id)
+        if loc is None:
+            return {"beams": [], "ts": time.time()}
+        ox, oy = loc.est_x, loc.est_y
+        beams: list[list[float]] = []
+        for i in range(LASER_NUM_RAYS):
+            ang = (2.0 * math.pi * i) / LASER_NUM_RAYS
+            dx, dy = math.cos(ang), math.sin(ang)
+            best_t: Optional[float] = None
+            for (ax, ay), (bx, by) in self._walls:
+                t = _ray_segment_t(ox, oy, dx, dy, ax, ay, bx, by)
+                if t is not None and t <= LASER_MAX_RANGE_M and (best_t is None or t < best_t):
+                    best_t = t
+            if best_t is None:
+                continue
+            hit = best_t + self._rng.uniform(-LASER_NOISE_M, LASER_NOISE_M)
+            beams.append([ox + hit * dx, oy + hit * dy])
+        return {"beams": beams, "ts": time.time()}
+
     # ── Recovery signals ──────────────────────────────────────────────────
     def nav_failed(self, robot_id: str) -> bool:
         return self._loc[robot_id].nav_failed
-
     def healthy(self, robot_id: str) -> bool:
         """Health (connection) is independent of localization: a sim robot can be
         healthy but lost. Only force_unhealthy() takes it offline."""

@@ -149,6 +149,16 @@ class SeerProvider:
             return False
         return conn.set_do(do_id, status)
 
+    def laser(self, robot_id: str) -> dict:
+        """World-frame laser scan pulled by the poll thread (~2 Hz). Served via
+        GET /robots/<id>/laser. Beams are [x, y] metres in the MAP frame per the
+        protocol PDF (p.24) — drawn directly by the frontend with no transform."""
+        conn = self._conns.get(robot_id)
+        if conn is None:
+            return {"beams": [], "ts": 0.0}
+        s = conn.state.snapshot()
+        return {"beams": s.get("laser_beams", []), "ts": s.get("laser_ts", 0.0)}
+
     def raw_state(self, robot_id: str) -> dict:
         """Rich per-tick fields straight from the RobotConn poll thread snapshot.
         confidence / blocked / lift DI/DO are opportunistic — they are only

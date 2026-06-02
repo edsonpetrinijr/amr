@@ -4,7 +4,7 @@
 import type { FleetMsg, Task } from './types'
 import type {
   JogResult, StopAllResult, ResumeResult,
-  StatsSummary, RobotTelemetry, TasksHistory,
+  StatsSummary, RobotTelemetry, TasksHistory, LaserScan,
 } from './types'
 
 const BASE: string = import.meta.env?.VITE_FLEET_URL ?? 'http://localhost:8765'
@@ -109,6 +109,11 @@ export const fleetApi = {
   getMap:          ()                             => _json('/map'),
   getStations:     ()                             => _json('/stations'),
   getRobots:       ()                             => _json('/robots'),
+
+  /** Dedicated PULL for the laser layer — frontend polls ~2–3 Hz only while the
+   *  Laser toggle is ON. Beams are WORLD/MAP-frame [x,y] metres (no transform). */
+  getLaser: (robot_id: string) =>
+    _json(`/robots/${robot_id}/laser`) as Promise<LaserScan>,
   getTasks:        ()                             => _json('/tasks'),
 
   createTask: (pickup: string, dropoff: string)  =>

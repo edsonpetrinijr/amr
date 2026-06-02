@@ -13,12 +13,13 @@
  *   selectedId   — highlight a robot or station id
  */
 import React, { useMemo, useRef, useState, useCallback, useEffect } from 'react'
-import type { MapModel, Robot, Station } from '../api/types'
+import type { MapModel, Robot, Station, LaserScan } from '../api/types'
 
 interface Props {
   map: MapModel
   robots?: Robot[]
   stations?: Station[]
+  laser?: LaserScan
   onClickAP?: (station: Station) => void
   onClickRobot?: (robot: Robot) => void
   selectedId?: string | null
@@ -64,7 +65,7 @@ const STATION_COLOR: Record<string, string> = {
   ap:         '#58a6ff',
 }
 
-export function MapCanvas({ map, robots = [], stations = [], onClickAP, onClickRobot, selectedId, className }: Props) {
+export function MapCanvas({ map, robots = [], stations = [], laser, onClickAP, onClickRobot, selectedId, className }: Props) {
   const { tx, ty, scale } = useTransform(map)
 
   // ── Camera (pan + zoom) — manipulate the SVG viewBox ─────────────
@@ -147,6 +148,13 @@ export function MapCanvas({ map, robots = [], stations = [], onClickAP, onClickR
     const step = Math.max(1, Math.floor(map.nav_points.length / 600))
     return map.nav_points.filter((_, i) => i % step === 0)
   }, [map.nav_points])
+
+  // Laser beams — downsample to max 600 pts for perf (like navSample)
+  const laserSample = useMemo(() => {
+    const beams = laser?.beams ?? []
+    const step = Math.max(1, Math.floor(beams.length / 600))
+    return beams.filter((_, i) => i % step === 0)
+  }, [laser])
 
   return (
     <svg
@@ -273,6 +281,16 @@ export function MapCanvas({ map, robots = [], stations = [], onClickAP, onClickR
           </g>
         )
       })}
+
+      {/* ── Laser scan ───────────────────────────────────────────────────
+          NOTE(real HW): beams are WORLD/MAP-frame [x,y] metres per protocol PDF
+          p.24 — drawn directly via tx()/ty() with NO pose composition. If a real
+          unit ever returns robot-relative/angle-distance, this render breaks;
+          confirm the field shape on the first real-robot test. */}
+      {laserSample.map((b, i) => (
+        <circle key={`laser-${i}`} cx={tx(b[0])} cy={ty(b[1])}
+          r={0.8} fill="#f0883e" fillOpacity={0.5} />
+      ))}
 
       {/* ── Robots ───────────────────────────────────────────────────── */}
       {robots.map(r => {

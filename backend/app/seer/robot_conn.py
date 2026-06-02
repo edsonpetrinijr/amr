@@ -24,7 +24,7 @@ from .protocol import (
     pack_msg, unpack_head,
     robot_control_motion_req, robot_control_reloc_req,
     robot_other_setdo_req,
-    robot_status_info_req, robot_status_loc_req,
+    robot_status_info_req, robot_status_laser_req, robot_status_loc_req,
     robot_status_speed_req, robot_status_task_req,
     robot_task_gotarget_req,
 )
@@ -34,6 +34,7 @@ log = logging.getLogger(__name__)
 CONN_TIMEOUT   = 3.0    # seconds to wait for connect
 READ_TIMEOUT   = 5.0    # seconds to wait for a reply
 POLL_INTERVAL  = 0.5    # seconds between state polls
+LASER_INTERVAL = 0.5    # seconds between laser scans (~2 Hz; not every state tick adds load)
 RECONNECT_WAIT = 5.0    # seconds before retry after disconnection
 
 
@@ -54,6 +55,11 @@ class RobotState:
     # TODO(real HW): confirm exact field names against the unit's API replies.
     confidence:  Optional[float] = None   # localization confidence / reloc score
     blocked:     bool  = False            # obstacle/blocked flag
+    # Laser scan — array of [x, y] points in the WORLD/MAP frame (metres), as
+    # published by request 1009 (reply field `laser_beams`). Pulled at ~2 Hz by
+    # the poll thread and served via GET /robots/<id>/laser.
+    laser_beams: list  = field(default_factory=list)
+    laser_ts:    float = 0.0
     last_seen:   float = field(default_factory=time.time)
     _lock:       threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
@@ -111,6 +117,7 @@ class RobotConn:
         self.state    = RobotState()
         self._stop    = threading.Event()
         self._seq     = 0
+        self._last_laser = 0.0    # monotonic-ish gate for laser fetch (~2 Hz)
         self._thread  = threading.Thread(target=self._poll_loop, daemon=True, name=f"poll-{robot_id}")
 
     def start(self) -> None:
@@ -212,6 +219,14 @@ class RobotConn:
                     updates['battery'] = float(batt)
 
             self.state.update(**updates)
+
+            # ── Laser scan (gated to ~2 Hz; separate socket via _cmd) ─────────
+            now = time.time()
+            if now - self._last_laser >= LASER_INTERVAL:
+                beams = self.get_laser()
+                self.state.update(laser_beams=beams, laser_ts=now)
+                self._last_laser = now
+
             return True
 
         except (socket.timeout, socket.error) as e:
@@ -219,6 +234,20 @@ class RobotConn:
             return False
 
     # ── Command API ───────────────────────────────────────────────────────────
+
+    def get_laser(self, step: int = 4) -> list:
+        """Pull one laser scan (request 1009). `step` is the decimation stride
+        (3–5; lower = more points). Returns the `laser_beams` array or [] on
+        failure. NOTE(real HW): the protocol PDF (p.24) states beams are already
+        in the WORLD/MAP frame as [x, y] metres — the frontend renders them with
+        NO pose composition. If a real unit ever returns robot-relative or
+        angle/distance instead, this assumption (and the frontend render) breaks.
+        Confirm field shape on the first real-robot test."""
+        reply = _cmd(self.ip, API_PORT_STATE, self._next_seq(),
+                     robot_status_laser_req, {'step': step})
+        if not reply:
+            return []
+        return reply.get('laser_beams', [])
 
     def goto_target(self, landmark_id: str) -> bool:
         """Send the robot to a SEER landmark (LM1, LM2 …). Returns True if ACK received."""

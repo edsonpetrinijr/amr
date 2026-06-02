@@ -218,6 +218,12 @@ def _startup() -> None:
 
     if config.SIM_MODE:
         provider = SimProvider()
+        # Feed map walls to the synthetic laser ray-caster (offline LiDAR sim).
+        if _map_model and hasattr(provider, "set_walls"):
+            provider.set_walls([
+                ((w.start.x, w.start.y), (w.end.x, w.end.y))
+                for w in _map_model.walls
+            ])
         log.info("Using SimProvider (SIM_MODE=true)")
     else:
         provider = SeerProvider()
@@ -385,6 +391,21 @@ def get_robots():
     if not _dispatcher:
         return jsonify([])
     return jsonify([r.to_dict() for r in _dispatcher.provider.robots.values()])
+
+
+@app.route("/robots/<robot_id>/laser")
+def get_robot_laser(robot_id: str):
+    """Dedicated PULL endpoint for the laser layer (frontend polls ~2–3 Hz only
+    while the Laser toggle is ON — deliberately NOT pushed in the 10 Hz world
+    SSE). Returns {"beams": [[x,y],…], "ts": float} in the WORLD/MAP frame."""
+    if not _dispatcher:
+        return jsonify({"error": "Dispatcher not ready"}), 503
+    provider = _dispatcher.provider
+    if robot_id not in provider.robots:
+        return jsonify({"error": "Robot not found"}), 404
+    if not hasattr(provider, "laser"):
+        return jsonify({"beams": [], "ts": 0.0})
+    return jsonify(provider.laser(robot_id))
 
 
 @app.route("/tasks")
