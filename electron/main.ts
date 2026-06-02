@@ -37,10 +37,7 @@ function createWindow() {
     win.loadFile(path.join(RENDERER_DIST, 'index.html'))
   }
 
-  // Start Fleet backend bridge after renderer is ready
-  const _win = win;
-  _win.webContents.once('did-finish-load', () => {
-    // Fleet WS bridge wired in Phase 1
+  win.webContents.once('did-finish-load', () => {
     console.log('[fleet] renderer ready')
   })
 }

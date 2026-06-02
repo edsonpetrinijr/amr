@@ -1,4 +1,3 @@
-import React from "react"
 import { createBrowserRouter } from "react-router"
 import { Layout } from "./components/Layout"
 import { Dashboard } from "./pages/Dashboard"

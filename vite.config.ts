@@ -11,13 +11,6 @@ export default defineConfig({
     electron({
       main: {
         entry: 'electron/main.ts',
-        vite: {
-          build: {
-            rollupOptions: {
-              external: ['ws', 'bufferutil', 'utf-8-validate'],
-            },
-          },
-        },
       },
       preload: {
         input: 'electron/preload.ts',

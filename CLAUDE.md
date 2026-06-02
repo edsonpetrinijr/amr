@@ -4,40 +4,51 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-BehaveX — React/TypeScript dashboard for multi-agent swarm simulation management. Visualizes experiments, runs, comparisons, and swarm configurations. Currently frontend-only with mock data (no backend integration).
+An AMR (Autonomous Mobile Robot) fleet-orchestration desktop app. An Electron + React/TypeScript
+frontend talks to a Python Flask backend (port `8765`) over Server-Sent Events (`/events`) plus REST.
+The backend dispatches tasks to SEER AMRs over TCP (`19204` state / `19205` control / `19206` task /
+`19210` IO) and ships a Sim provider for offline development. An OPC UA callbutton driver handles
+plant-floor triggers, and SQLite (`fleet.db`) stores telemetry.
 
 ## Build & Dev Commands
 
-No build system configured yet. Once set up (likely Vite + npm):
-
 ```bash
 npm install         # install deps
-npm run dev         # dev server
-npm run build       # production build
-npm run lint        # ESLint
-npm test            # test suite
-npm test -- path/to/test  # single test
+npm run dev         # Electron + Vite dev (vite)
+npm run web         # browser-only dev (vite --config vite.web.config.ts)
+npm run build       # tsc + vite build + electron-builder
+npm run lint        # ESLint (eslint src --ext ts,tsx)
 ```
+
+The Python backend runs separately (see `backend/` and `run-backend.bat`) and listens on port `8765`.
 
 ## Architecture
 
-**Entry:** `src/app/App.tsx` → `src/app/routes.tsx` (React Router v7 `createBrowserRouter`)
+**Frontend entry:** `frontend/app/App.tsx` → `frontend/app/routes.tsx` (React Router v7
+`createBrowserRouter`).
 
-**Routes:**
-- `/` → `Dashboard` — recent experiments, active runs, metrics
-- `/experiment/:id` → `ExperimentDetail` — simulation canvas with playback controls (500 steps, 12 agents)
-- `/comparisons` → `Comparison` — side-by-side dual sim view with metrics diff
-- `/configs` → `SwarmConfig` — behavior policy config (GitHub URL, seeds, agent count, obstacle density)
+**Routes** (all wrapped by `frontend/app/components/Layout.tsx`):
+- `/` → `Dashboard` — fleet overview
+- `/field` → `Field` — live map / robot positions
+- `/devices` → `Devices` — robot & device inventory
+- `/calibration` → `Calibration` (also `/calibration/:robotId`)
+- `/tasks` → `Tasks` — task definitions / dispatch
+- `/callbuttons` → `Callbuttons` — OPC UA callbutton bindings
+- `/settings` → `SettingsPage`
 
-**Layout:** `src/app/components/Layout.tsx` — sidebar nav wrapping all pages. Brand: "AeroNet v2.4.1".
+**Backend:** `backend/app/` — Flask app exposing REST + SSE (`/events`). Dispatches to SEER Robokit
+over TCP with a Sim provider for offline dev; OPC UA driver for callbuttons; SQLite (`fleet.db`)
+telemetry. (Do not edit the backend from frontend tasks unless asked.)
 
-**UI Components:** `src/app/components/ui/` — 50+ shadcn/ui components. Use existing ones before adding new.
+**Electron:** `electron/main.ts` (main process) + `electron/preload.ts`.
 
-**Styling:** Tailwind CSS v4, dark GitHub-inspired theme (`#0d1117` bg, `#58a6ff` accent). Colors defined in `src/styles/theme.css` as OKLCH CSS vars. Utility helper `cn()` in `src/app/utils.ts` (clsx + tailwind-merge).
+**UI Components:** `frontend/app/components/ui/` — shadcn/ui components. Reuse existing ones before
+adding new.
 
-## Key Constraints
+**Styling:** Tailwind CSS v4, dark GitHub-inspired theme (`#0d1117` bg, `#58a6ff` accent). Colors
+defined in `frontend/styles/theme.css` as OKLCH CSS vars. Utility helper `cn()` (clsx +
+tailwind-merge) in `frontend/app/utils.ts`.
 
-- All simulation data is currently mocked client-side — no API layer exists
-- Robot/agent state tracked via `useState` + `useEffect` intervals in page components
-- `ExperimentDetail` max 500 steps, `Comparison` max 400 steps, 8 robots per sim
-- Divergence detection in Comparison highlights steps 150–200
+## Maps & Tasks
+
+Map and task files live in `maps/`. The backend loads these for routing and task dispatch.
