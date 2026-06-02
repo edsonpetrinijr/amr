@@ -95,6 +95,24 @@ PROGRESS_EPS          = float(os.getenv("PROGRESS_EPS", "1.0"))            # uni
 MAX_TASK_RETRIES      = int(os.getenv("MAX_TASK_RETRIES", "2"))            # re-queue attempts before T_FAILED
 ROBOT_COOLDOWN_S      = float(os.getenv("ROBOT_COOLDOWN_S", "20.0"))       # s — failed robot not retried on same task
 
+# ── Operator manual controls & analytics queries (single-plant pilot) ───────
+# Manual JOG safety envelope. vx/vy/w are clamped to ±MAX before being sent to
+# the robot (units match SeerProvider.send_velocity → SEER ctrl port 19205:
+# vx/vy m/s, w rad/s). Conservative defaults — an operator nudging a robot on a
+# live floor should move slowly. All env-overridable.
+JOG_MAX_VX = float(os.getenv("JOG_MAX_VX", "0.30"))   # m/s — forward/back
+JOG_MAX_VY = float(os.getenv("JOG_MAX_VY", "0.30"))   # m/s — strafe (omni only)
+JOG_MAX_W  = float(os.getenv("JOG_MAX_W",  "0.40"))   # rad/s — yaw
+# A jog with a duration auto-stops after this many seconds; without a duration
+# the command is single-shot and the operator must send zeros / call stop.
+JOG_DEFAULT_DURATION_S = float(os.getenv("JOG_DEFAULT_DURATION_S", "0.5"))
+JOG_MAX_DURATION_S     = float(os.getenv("JOG_MAX_DURATION_S", "3.0"))
+
+# Read-only telemetry/analytics query caps — never scan unbounded rows on the
+# request thread.
+TELEMETRY_QUERY_DEFAULT_LIMIT = int(os.getenv("TELEMETRY_QUERY_DEFAULT_LIMIT", "500"))
+TELEMETRY_QUERY_MAX_LIMIT     = int(os.getenv("TELEMETRY_QUERY_MAX_LIMIT", "5000"))
+
 # ── Telemetry capture (soak-run diagnostics) ────────────────────────────────
 # A telemetry run is self-contained: one RUN_ID stamped on every row.
 import time as _time

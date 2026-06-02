@@ -18,10 +18,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import threading
 import time
 from typing import Optional, Callable, Awaitable
 
 from . import config
+from . import db
 from .config import BATTERY_LOW_THRESHOLD
 from .models import (
     Robot, Station, Task,
@@ -36,6 +38,10 @@ from .provider import Provider
 log = logging.getLogger(__name__)
 
 TICK_INTERVAL = 1.0 / config.TICK_HZ
+
+
+def _clamp(v: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, v))
 
 
 class Dispatcher:
@@ -63,6 +69,11 @@ class Dispatcher:
 
         # Broadcast callback set by the WS layer
         self._broadcast: Optional[Callable[[dict], Awaitable[None]]] = None
+
+        # Software STOP-ALL gate. When True, _assign_pending early-returns so no
+        # new auto-assignment happens until resume(). This is a SOFTWARE stop,
+        # NOT a substitute for a hardware E-stop.
+        self._halted = False
 
         self._running = False
 
@@ -99,6 +110,7 @@ class Dispatcher:
         task = Task.new(pickup=pickup, dropoff=dropoff)
         self._tasks[task.id] = task
         self._station_lock[pickup] = task.id
+        db.log_task_event(task, "created")
         log.info("task created: %s %s→%s", task.id, pickup, dropoff)
         return task
 
@@ -194,6 +206,103 @@ class Dispatcher:
         done = (T_DONE, T_CANCELLED, T_FAILED)
         return [t for t in self._tasks.values() if t.state not in done]
 
+    # ── Operator controls (manual jog / software STOP-ALL) ────────────────────
+
+    @property
+    def halted(self) -> bool:
+        return self._halted
+
+    def jog(self, robot_id: str, vx: float, vy: float, w: float,
+            duration: Optional[float] = None) -> tuple[int, dict]:
+        """Manual operator jog. Returns (http_status, payload).
+
+        SAFETY gates (fail closed):
+          • unknown robot                → 404
+          • robot has an active task     → 409 (operator must cancel first)
+          • robot unhealthy/offline      → 409 (reuse recovery healthy() check)
+        vx/vy/w are clamped to the JOG_MAX_* envelope before being sent. With a
+        duration the robot auto-stops after that many seconds; without one the
+        command is single-shot (operator must send zeros or call stop). Allowed
+        even while STOP-ALL is engaged so an operator can recover the fleet.
+        """
+        robot = self.provider.robots.get(robot_id)
+        if robot is None:
+            return 404, {"error": f"unknown robot '{robot_id}'"}
+        if robot.current_task:
+            return 409, {"error": "robot has an active task — cancel it before manual jog",
+                         "robot_id": robot_id, "current_task": robot.current_task}
+        if not self._robot_healthy(robot):
+            return 409, {"error": "robot unhealthy/offline — refusing manual jog",
+                         "robot_id": robot_id}
+
+        cvx = _clamp(vx, -config.JOG_MAX_VX, config.JOG_MAX_VX)
+        cvy = _clamp(vy, -config.JOG_MAX_VY, config.JOG_MAX_VY)
+        cw  = _clamp(w,  -config.JOG_MAX_W,  config.JOG_MAX_W)
+        dur = _clamp(duration, 0.0, config.JOG_MAX_DURATION_S) if duration is not None else None
+
+        ok = False
+        send = getattr(self.provider, "send_velocity", None)
+        if callable(send):
+            ok = bool(send(robot_id, cvx, cvy, cw))
+
+        # Auto-stop after the requested window (only if actually moving).
+        if dur and (cvx or cvy or cw):
+            timer = threading.Timer(dur, self._jog_stop, args=(robot_id,))
+            timer.daemon = True
+            timer.start()
+
+        return 200, {
+            "ok": ok, "robot_id": robot_id,
+            "vx": cvx, "vy": cvy, "w": cw, "duration": dur,
+            "clamped": (cvx != vx or cvy != vy or cw != w),
+            "halted": self._halted,
+        }
+
+    def _jog_stop(self, robot_id: str) -> None:
+        try:
+            self.provider.stop(robot_id)
+        except Exception as exc:  # noqa: BLE001 — a failed auto-stop must not crash the timer thread
+            log.warning("jog auto-stop failed for %s: %s", robot_id, exc)
+
+    def stop_all(self) -> list[Task]:
+        """Emergency SOFTWARE stop. NOT a substitute for a hardware E-stop.
+
+        Commands every robot to stop, cancels all active tasks (releasing their
+        station locks and setting robots idle), and engages the halted flag so
+        auto-assignment is blocked until resume(). Returns the cancelled tasks
+        so the caller can broadcast task_update messages.
+        """
+        self._halted = True
+        for robot in self.provider.robots.values():
+            try:
+                self.provider.stop(robot.id)
+            except Exception as exc:  # noqa: BLE001 — stop the rest even if one fails
+                log.warning("stop_all: stop failed for %s: %s", robot.id, exc)
+
+        cancelled: list[Task] = []
+        for task in self.active_tasks():
+            if task.robot:
+                robot = self.provider.robots.get(task.robot)
+                if robot:
+                    robot.status = IDLE
+                    robot.current_task = None
+            self._release_task(task, T_CANCELLED)
+            cancelled.append(task)
+
+        # Any robot left mid-motion (no task) is also parked idle.
+        for robot in self.provider.robots.values():
+            if robot.status not in (CHARGING, OFFLINE):
+                robot.status = IDLE
+                robot.current_task = None
+        log.critical("STOP-ALL engaged — %d task(s) cancelled (SOFTWARE stop, not E-stop)",
+                     len(cancelled))
+        return cancelled
+
+    def resume(self) -> None:
+        """Clear the STOP-ALL halt so auto-assignment can run again."""
+        self._halted = False
+        log.info("STOP-ALL cleared — auto-dispatch resumed")
+
     # ── Main loop ─────────────────────────────────────────────────────────────
 
     async def run(self) -> None:
@@ -221,6 +330,8 @@ class Dispatcher:
     # ── Assignment ────────────────────────────────────────────────────────────
 
     def _assign_pending(self) -> None:
+        if self._halted:
+            return  # STOP-ALL engaged — no new auto-assignment until resume()
         for task in list(self._tasks.values()):
             if task.state != T_PENDING:
                 continue
@@ -239,6 +350,7 @@ class Dispatcher:
             # Initialize stuck-detection progress trackers from the robot's pose.
             task.last_x, task.last_y = robot.x, robot.y
             task.last_progress_at = time.time()
+            db.log_task_event(task, "assigned")
             log.info("assigned %s → robot %s pickup=%s drop=%s", task.id, robot.id, task.pickup, task.dropoff)
             asyncio.ensure_future(self._emit(task_update_msg(task, "assigned")))
 
@@ -447,6 +559,7 @@ class Dispatcher:
         held = self._station_lock.get(task.pickup)
         if held == task.id:
             del self._station_lock[task.pickup]
+        db.log_task_event(task, final_state)
 
     async def _emit(self, msg: dict) -> None:
         if self._broadcast:

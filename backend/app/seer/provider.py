@@ -83,6 +83,18 @@ class SeerProvider:
         r.goal_x = r.goal_y = r.goal_station = None
         r.nav = 'idle'
 
+    def send_velocity(self, robot_id: str, vx: float, vy: float, w: float) -> bool:
+        """Open-loop manual velocity (operator jog) → SEER ctrl port 19205.
+        Clears any nav goal so tick() doesn't fight the operator."""
+        conn = self._conns.get(robot_id)
+        if conn is None:
+            return False
+        r = self.robots.get(robot_id)
+        if r is not None:
+            r.goal_x = r.goal_y = r.goal_station = None
+            r.nav = 'idle'
+        return conn.send_velocity(vx, vy, w)
+
     def arrived(self, robot_id: str) -> bool:
         conn = self._conns.get(robot_id)
         if conn is None:

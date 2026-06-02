@@ -18,6 +18,9 @@ class Provider:
 
     def goto(self, robot_id: str, x: float, y: float, station: Optional[str]) -> None: ...
     def stop(self, robot_id: str) -> None: ...
+    def send_velocity(self, robot_id: str, vx: float, vy: float, w: float) -> bool:
+        """Open-loop manual velocity command (operator jog). Default no-op."""
+        return False
     def tick(self, dt: float) -> None: ...
     def arrived(self, robot_id: str) -> bool: ...
     def raw_state(self, robot_id: str) -> dict: ...
@@ -45,6 +48,10 @@ class SimProvider(Provider):
         # SIM-ONLY recovery test hooks (absent on SeerProvider).
         self._force_unhealthy: dict[str, bool] = {}
         self._force_nav_fail: set[str] = set()
+        # Manual operator jog velocities (robot_id → (vx, vy, w)); integrated in
+        # tick() until cleared by stop(). Lets the Calibration page actually move
+        # the sim robot, mirroring SeerProvider.send_velocity on real HW.
+        self._manual_vel: dict[str, tuple[float, float, float]] = {}
 
     def goto(self, robot_id: str, x: float, y: float, station: Optional[str]) -> None:
         r = self.robots[robot_id]
@@ -56,7 +63,22 @@ class SimProvider(Provider):
         r = self.robots[robot_id]
         r.goal_x = r.goal_y = r.goal_station = None
         r.nav = "idle"
+        self._manual_vel.pop(robot_id, None)       # cancel any manual jog
         self._force_nav_fail.discard(robot_id)  # nav failure acknowledged
+
+    def send_velocity(self, robot_id: str, vx: float, vy: float, w: float) -> bool:
+        """Manual operator jog. Stores the velocity; tick() integrates it.
+        Zero velocity is treated as a stop (clears the manual hold)."""
+        r = self.robots.get(robot_id)
+        if r is None:
+            return False
+        r.goal_x = r.goal_y = r.goal_station = None
+        r.nav = "idle"
+        if vx == 0 and vy == 0 and w == 0:
+            self._manual_vel.pop(robot_id, None)
+        else:
+            self._manual_vel[robot_id] = (vx, vy, w)
+        return True
 
     def arrived(self, robot_id: str) -> bool:
         return self.robots[robot_id].nav == "idle"
@@ -113,6 +135,14 @@ class SimProvider(Provider):
         step = config.ROBOT_SPEED * dt
         for r in self.robots.values():
             r.last_seen = time.time()
+            # Manual operator jog takes priority over goal-following.
+            mv = self._manual_vel.get(r.id)
+            if mv is not None:
+                vx, vy, w = mv
+                r.x = max(0.0, min(100.0, r.x + vx * dt))
+                r.y = max(0.0, min(100.0, r.y + vy * dt))
+                r.theta += w * dt
+                continue
             if r.nav != "moving" or r.paused or r.goal_x is None:
                 # idle drain is negligible; trickle-charge near base handled by dispatcher
                 continue

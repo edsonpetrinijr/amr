@@ -44,7 +44,7 @@ from flask import Flask, Response, jsonify, request, stream_with_context
 
 from . import config, db
 from .dispatcher import Dispatcher
-from .models import world_snapshot, alarm_msg
+from .models import world_snapshot, alarm_msg, task_update_msg, IDLE, OFFLINE, CHARGING
 from .opcua import OpcUaCallbuttonDriver
 from .provider import SimProvider
 from .seer import SeerProvider
@@ -356,6 +356,146 @@ def relocalize():
         ok = _dispatcher.provider.relocalize(rid, x, y, theta)
         return jsonify({"ok": ok, "note": "hardware command sent" if ok else "command failed"})
     return jsonify({"ok": True, "note": "sim mode — no hardware command sent"})
+
+
+# ── Operator controls: manual jog / software STOP-ALL ─────────────────────────
+
+@app.route("/jog", methods=["POST", "OPTIONS"])
+def jog():
+    """Manual operator jog. Body: {robot_id, vx, vy, w, duration?}.
+    Velocities are clamped to the JOG_MAX_* envelope. Refuses (409) if the robot
+    has an active task or is unhealthy/offline; (404) for unknown robot; (400)
+    for non-numeric values. Allowed while STOP-ALL is engaged (operator recovery).
+    """
+    if request.method == "OPTIONS":
+        return "", 204
+    if not _dispatcher:
+        return jsonify({"error": "Dispatcher not ready"}), 503
+    body = request.get_json(force=True, silent=True) or {}
+    rid = body.get("robot_id")
+    if not rid:
+        return jsonify({"error": "robot_id required"}), 400
+    try:
+        vx = float(body.get("vx", 0.0))
+        vy = float(body.get("vy", 0.0))
+        w  = float(body.get("w", 0.0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "vx/vy/w must be numbers"}), 400
+    if any(v != v or v in (float("inf"), float("-inf")) for v in (vx, vy, w)):
+        return jsonify({"error": "vx/vy/w out of range"}), 400
+    duration = body.get("duration")
+    if duration is not None:
+        try:
+            duration = float(duration)
+        except (TypeError, ValueError):
+            return jsonify({"error": "duration must be a number"}), 400
+        if duration <= 0 or duration != duration:
+            return jsonify({"error": "duration must be > 0"}), 400
+
+    code, payload = _dispatcher.jog(rid, vx, vy, w, duration)
+    if code == 200:
+        moving = bool(payload["vx"] or payload["vy"] or payload["w"])
+        level = "warn" if moving else "info"
+        _broadcast(alarm_msg(
+            level,
+            f"manual control of {rid} (jog vx={payload['vx']:.2f} vy={payload['vy']:.2f} w={payload['w']:.2f})",
+            rid,
+        ))
+    return jsonify(payload), code
+
+
+@app.route("/stop_all", methods=["POST", "OPTIONS"])
+def stop_all():
+    """Emergency SOFTWARE stop — NOT a substitute for a hardware E-stop.
+    Stops every robot, cancels all active tasks, and halts auto-dispatch until
+    POST /resume."""
+    if request.method == "OPTIONS":
+        return "", 204
+    if not _dispatcher:
+        return jsonify({"error": "Dispatcher not ready"}), 503
+    cancelled = _dispatcher.stop_all()
+    _broadcast(alarm_msg(
+        "critical",
+        "FLEET STOP-ALL engaged by operator — SOFTWARE stop only, NOT a hardware E-stop",
+        None,
+    ))
+    for t in cancelled:
+        _broadcast(task_update_msg(t, "cancelled"))
+    return jsonify({
+        "halted": True,
+        "cancelled": [t.id for t in cancelled],
+        "note": "software stop — NOT a hardware E-stop",
+    })
+
+
+@app.route("/resume", methods=["POST", "OPTIONS"])
+def resume():
+    """Clear the STOP-ALL halt and re-enable auto-dispatch."""
+    if request.method == "OPTIONS":
+        return "", 204
+    if not _dispatcher:
+        return jsonify({"error": "Dispatcher not ready"}), 503
+    _dispatcher.resume()
+    _broadcast(alarm_msg("info", "Fleet auto-dispatch resumed by operator", None))
+    return jsonify({"halted": False})
+
+
+# ── Telemetry / analytics queries (read-only, for the Dashboard) ──────────────
+
+def _clamp_limit(raw, default: int) -> int:
+    try:
+        n = int(raw) if raw is not None else default
+    except (TypeError, ValueError):
+        n = default
+    return max(1, min(n, config.TELEMETRY_QUERY_MAX_LIMIT))
+
+
+@app.route("/telemetry/robots/<robot_id>")
+def telemetry_for_robot(robot_id: str):
+    since = request.args.get("since")
+    since_ts = float(since) if since not in (None, "") else None
+    limit = _clamp_limit(request.args.get("limit"), config.TELEMETRY_QUERY_DEFAULT_LIMIT)
+    rows = db.query_telemetry(robot_id, since=since_ts, limit=limit)
+    return jsonify({"robot_id": robot_id, "count": len(rows), "rows": rows})
+
+
+@app.route("/tasks/history")
+def tasks_history():
+    since = request.args.get("since")
+    since_ts = float(since) if since not in (None, "") else None
+    limit = _clamp_limit(request.args.get("limit"), config.TELEMETRY_QUERY_DEFAULT_LIMIT)
+    tasks = db.query_task_history(since=since_ts, limit=limit)
+    return jsonify({"count": len(tasks), "tasks": tasks})
+
+
+@app.route("/stats/summary")
+def stats_summary():
+    """Aggregate fleet KPIs for the Dashboard. Task counts/durations come from
+    task_events (source of truth across restarts); utilization/battery from the
+    live fleet state."""
+    # Start of local day.
+    lt = time.localtime()
+    start_of_day = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1))
+    counts = db.task_counts_since(start_of_day)
+
+    robots = list(_dispatcher.provider.robots.values()) if _dispatcher else []
+    total = len(robots)
+    active = sum(1 for r in robots if r.current_task or r.status not in (IDLE, OFFLINE, CHARGING))
+    avg_batt = round(sum(r.battery for r in robots) / total, 1) if total else None
+
+    return jsonify({
+        "tasks_completed_today": counts["completed"],
+        "tasks_failed_today": counts["failed"],
+        "avg_task_duration_s": counts["avg_duration_s"],
+        "fleet_total": total,
+        "fleet_active": active,
+        "fleet_utilization": round(active / total, 3) if total else 0.0,
+        "avg_battery": avg_batt,
+        "halted": _dispatcher.halted if _dispatcher else False,
+    })
+
+
+
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
