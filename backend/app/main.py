@@ -42,7 +42,7 @@ if _env_file.exists():
 
 from flask import Flask, Response, jsonify, request, stream_with_context
 
-from . import config, db
+from . import config, db, telemetry
 from .dispatcher import Dispatcher
 from .models import world_snapshot, alarm_msg, task_update_msg, IDLE, OFFLINE, CHARGING
 from .opcua import OpcUaCallbuttonDriver
@@ -115,6 +115,89 @@ def _world_push_loop() -> None:
             db.log_telemetry(robots)
 
 
+def _telemetry_sampler_loop() -> None:
+    """Dedicated per-tick snapshot sampler at SAMPLE_HZ for the soak robot.
+
+    Mirrors the real SEER poll cadence (2 Hz) and works in BOTH sim and real
+    mode — SimProvider has no RobotConn thread, so capture can't be bolted onto
+    it. Every row is stamped with the authoritative (cycle_id, step) read
+    atomically from the SoakRunner, so telemetry and events always join cleanly.
+    """
+    interval = 1.0 / max(0.1, config.SAMPLE_HZ)
+    prev: dict = {"x": None, "y": None, "ts_mono": None,
+                  "connected": None, "blocked": False, "low_conf": False}
+    while True:
+        time.sleep(interval)
+        disp = _dispatcher
+        if not disp or disp.soak is None:
+            continue
+        soak = disp.soak
+        if not soak.running:
+            break
+        rid = soak.robot_id
+        robot = disp.provider.robots.get(rid)
+        if robot is None:
+            continue
+        raw = {}
+        get_raw = getattr(disp.provider, "raw_state", None)
+        if callable(get_raw):
+            raw = get_raw(rid) or {}
+
+        ts = time.time()
+        ts_mono = time.monotonic()
+        x, y = robot.x, robot.y
+        battery = robot.battery
+        connected = bool(raw.get("connected", True))
+        blocked = bool(raw.get("blocked", False))
+        confidence = raw.get("confidence")
+
+        # Velocity: prefer real SEER speed, else derive from pose delta.
+        vx, vy, w = raw.get("vx"), raw.get("vy"), raw.get("w")
+        if vx is None and prev["x"] is not None and prev["ts_mono"] is not None:
+            ddt = ts_mono - prev["ts_mono"]
+            if ddt > 0:
+                vx = (x - prev["x"]) / ddt
+                vy = (y - prev["y"]) / ddt
+
+        # Atomic tag + fold sample into the active cycle aggregates.
+        tag = soak.observe(x, y, battery, blocked, confidence)
+
+        last_seen = raw.get("last_seen", robot.last_seen)
+        row = {
+            "run_id": config.RUN_ID, "robot_id": rid, "ts": ts, "ts_mono": ts_mono,
+            "cycle_id": tag["cycle_id"], "step": tag["step"],
+            "x": x, "y": y, "theta": robot.theta, "vx": vx, "vy": vy, "w": w,
+            "battery": battery,
+            "task_status": raw.get("task_status"), "target_id": raw.get("target_id", ""),
+            "connected": 1 if connected else 0,
+            "last_seen_age": max(0.0, ts - last_seen) if last_seen else None,
+            "blocked": 1 if blocked else 0,
+            "confidence": confidence,
+            "lift_di": 1 if tag["lift_di"] else 0,
+            "lift_do": 1 if tag["lift_do"] else 0,
+        }
+        telemetry.write_telemetry(row)
+
+        # ── Edge-detected discrete events (poll-thread responsibilities) ─────
+        cyc, step = tag["cycle_id"], tag["step"]
+        if prev["connected"] is not None and connected != prev["connected"]:
+            ev = "comms_reconnect" if connected else "comms_lost"
+            telemetry.write_event(config.RUN_ID, rid, cyc, step, ev)
+        if blocked and not prev["blocked"]:
+            soak.note_obstacle_stop()
+            telemetry.write_event(config.RUN_ID, rid, cyc, step, "obstacle_stop")
+        elif not blocked and prev["blocked"]:
+            telemetry.write_event(config.RUN_ID, rid, cyc, step, "obstacle_clear")
+        if confidence is not None:
+            low = confidence < config.SOAK_CONF_LOW
+            if low and not prev["low_conf"]:
+                telemetry.write_event(config.RUN_ID, rid, cyc, step, "low_confidence",
+                                      detail={"confidence": confidence})
+            prev["low_conf"] = low
+
+        prev.update(x=x, y=y, ts_mono=ts_mono, connected=connected, blocked=blocked)
+
+
 def _startup() -> None:
     global _dispatcher, _map_model
 
@@ -152,6 +235,23 @@ def _startup() -> None:
 
     threading.Thread(target=_dispatcher_loop, daemon=True).start()
     threading.Thread(target=_world_push_loop, daemon=True).start()
+
+    # ── Soak telemetry capture (DATA CAPTURE ONLY) ──────────────────────────
+    if config.SOAK_MODE:
+        telemetry.init()
+        telemetry.print_run_banner()      # prominent wall-clock + run_id for the supervisor
+        if _dispatcher.soak is not None:
+            _dispatcher.soak.start()
+        threading.Thread(target=_telemetry_sampler_loop, daemon=True).start()
+
+        import atexit
+
+        def _shutdown_telemetry() -> None:
+            if _dispatcher and _dispatcher.soak is not None:
+                _dispatcher.soak.stop()
+            telemetry.close()
+        atexit.register(_shutdown_telemetry)
+        log.info("Soak telemetry capture active (run_id=%s)", config.RUN_ID)
 
     # OPC UA callbutton driver (starts only if OPCUA_ENDPOINT is set and asyncua present)
     opcua_driver = OpcUaCallbuttonDriver(_dispatcher)
@@ -493,9 +593,6 @@ def stats_summary():
         "avg_battery": avg_batt,
         "halted": _dispatcher.halted if _dispatcher else False,
     })
-
-
-
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
