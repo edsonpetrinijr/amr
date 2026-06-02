@@ -2,8 +2,17 @@
 // REST helpers for commands (create/cancel task, callbutton, relocalize).
 
 import type { FleetMsg, Task } from './types'
+import type {
+  JogResult, StopAllResult, ResumeResult,
+  StatsSummary, RobotTelemetry, TasksHistory,
+} from './types'
 
 const BASE = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_FLEET_URL) ?? 'http://localhost:8765'
+
+/** Configured backend base URL — for callers that need raw fetch (e.g. /setdo). */
+export function fleetBaseUrl(): string {
+  return BASE
+}
 
 // ── SSE ───────────────────────────────────────────────────────────────────────
 
@@ -51,6 +60,16 @@ export function onFleetMsg(fn: Listener): () => void {
 
 // ── REST helpers ──────────────────────────────────────────────────────────────
 
+/** Error carrying the HTTP status and the backend's JSON error message (if any). */
+export class FleetApiError extends Error {
+  status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'FleetApiError'
+    this.status = status
+  }
+}
+
 async function _json(path: string, opts?: RequestInit) {
   const r = await fetch(`${BASE}${path}`, {
     headers: { 'Content-Type': 'application/json' },
@@ -58,6 +77,31 @@ async function _json(path: string, opts?: RequestInit) {
   })
   if (!r.ok) throw new Error(`${opts?.method ?? 'GET'} ${path} → ${r.status}`)
   return r.json()
+}
+
+/** Like _json but parses the backend's `{error}` body and throws a FleetApiError
+ *  carrying the status — used where the UI needs to surface 4xx messages. */
+async function _jsonOrError(path: string, opts?: RequestInit) {
+  const r = await fetch(`${BASE}${path}`, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  })
+  let body: any = null
+  try { body = await r.json() } catch { /* no/invalid JSON body */ }
+  if (!r.ok) {
+    const msg = (body && (body.error || body.message)) || `${opts?.method ?? 'GET'} ${path} → ${r.status}`
+    throw new FleetApiError(r.status, msg)
+  }
+  return body
+}
+
+function _qs(opts?: { since?: number; limit?: number }): string {
+  if (!opts) return ''
+  const p = new URLSearchParams()
+  if (opts.since != null) p.set('since', String(opts.since))
+  if (opts.limit != null) p.set('limit', String(opts.limit))
+  const s = p.toString()
+  return s ? `?${s}` : ''
 }
 
 export const fleetApi = {
@@ -84,4 +128,34 @@ export const fleetApi = {
 
   relocalize: (robot_id: string, x: number, y: number, theta: number) =>
     _json('/relocalize', { method: 'POST', body: JSON.stringify({ robot_id, x, y, theta }) }),
+
+  // ── Manual control ──────────────────────────────────────────────────────────
+
+  /** Single-shot manual jog. Velocities are clamped server-side to the JOG
+   *  envelope. Throws FleetApiError on 404 (unknown robot) / 409 (active task or
+   *  unhealthy) / 400 (bad values) so callers can surface the message. */
+  jog: (robot_id: string, body: { vx: number; vy: number; w: number; duration?: number }) =>
+    _jsonOrError('/jog', {
+      method: 'POST',
+      body: JSON.stringify({ robot_id, ...body }),
+    }) as Promise<JogResult>,
+
+  /** Software STOP-ALL — halts every robot and cancels active tasks. */
+  stopAll: () =>
+    _json('/stop_all', { method: 'POST' }) as Promise<StopAllResult>,
+
+  /** Clear the STOP-ALL halt and re-enable auto-dispatch. */
+  resume: () =>
+    _json('/resume', { method: 'POST' }) as Promise<ResumeResult>,
+
+  // ── Analytics / telemetry (read-only) ───────────────────────────────────────
+
+  getStatsSummary: () =>
+    _json('/stats/summary') as Promise<StatsSummary>,
+
+  getRobotTelemetry: (robot_id: string, opts?: { since?: number; limit?: number }) =>
+    _json(`/telemetry/robots/${robot_id}${_qs(opts)}`) as Promise<RobotTelemetry>,
+
+  getTasksHistory: (opts?: { since?: number; limit?: number }) =>
+    _json(`/tasks/history${_qs(opts)}`) as Promise<TasksHistory>,
 }

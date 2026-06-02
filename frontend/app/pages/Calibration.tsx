@@ -1,8 +1,9 @@
 import React, { useState } from 'react'
 import { useParams, Link } from 'react-router'
 import { Wrench, AlertTriangle, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, RotateCw, RotateCcw, Square } from 'lucide-react'
+import { toast } from 'sonner'
 import { useFleet } from '../state/store'
-import { fleetApi } from '../api/fleet'
+import { fleetApi, FleetApiError, fleetBaseUrl } from '../api/fleet'
 import { MapCanvas } from '../components/MapCanvas'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
@@ -10,18 +11,55 @@ import type { Robot } from '../api/types'
 
 // ── Jog panel ─────────────────────────────────────────────────────────────────
 
+// Sane operator button values; the backend clamps to the JOG_MAX_* envelope.
+const JOG_V = 0.2          // m/s for translate/strafe
+const JOG_W = 0.3          // rad/s for rotate
+const JOG_DURATION = 0.5   // s — single short pulse per click
+
+type JogCmd = 'forward' | 'back' | 'left' | 'right' | 'ccw' | 'cw' | 'stop'
+
+const JOG_VECTORS: Record<JogCmd, { vx: number; vy: number; w: number }> = {
+  forward: { vx:  JOG_V, vy: 0,      w: 0 },
+  back:    { vx: -JOG_V, vy: 0,      w: 0 },
+  left:    { vx: 0,      vy:  JOG_V, w: 0 },
+  right:   { vx: 0,      vy: -JOG_V, w: 0 },
+  ccw:     { vx: 0,      vy: 0,      w:  JOG_W },
+  cw:      { vx: 0,      vy: 0,      w: -JOG_W },
+  stop:    { vx: 0,      vy: 0,      w: 0 },
+}
+
 function JogPanel({ robot }: { robot: Robot }) {
   const [sending, setSending] = useState(false)
 
-  async function sendVelocity(cmd: 'forward'|'back'|'left'|'right'|'ccw'|'cw'|'stop') {
-    // velocity sent via motion endpoint — uses the REST bridge
+  async function sendVelocity(cmd: JogCmd) {
     setSending(true)
     try {
-      // We repurpose /relocalize body shape since there is no jog REST yet.
-      // In practice the SeerProvider.send_velocity() is triggered by the dispatcher;
-      // for manual jog we'll expose a dedicated /jog endpoint in Phase 6 hardening.
-      // For now this button shows the intent and logs to console.
-      console.log('[jog]', cmd, robot.id)
+      const v = JOG_VECTORS[cmd]
+      // 'stop' is single-shot (no duration); motion pulses auto-stop after JOG_DURATION.
+      const res = await fleetApi.jog(robot.id, cmd === 'stop'
+        ? { vx: 0, vy: 0, w: 0 }
+        : { ...v, duration: JOG_DURATION })
+
+      if (cmd === 'stop') {
+        toast.success(`Stop sent to ${robot.id}`)
+      } else if (res.clamped) {
+        toast.warning(`Jog ${cmd} — clamped to safe limits`, {
+          description: `vx=${res.vx.toFixed(2)} vy=${res.vy.toFixed(2)} w=${res.w.toFixed(2)}`,
+        })
+      } else {
+        toast.success(`Jog ${cmd} sent`, {
+          description: `vx=${res.vx.toFixed(2)} vy=${res.vy.toFixed(2)} w=${res.w.toFixed(2)} · ${res.duration ?? 0}s`,
+        })
+      }
+    } catch (e) {
+      if (e instanceof FleetApiError) {
+        if (e.status === 409)      toast.error('Jog refused', { description: e.message })
+        else if (e.status === 404) toast.error('Unknown robot', { description: e.message })
+        else if (e.status === 400) toast.error('Invalid jog command', { description: e.message })
+        else                       toast.error('Jog failed', { description: e.message })
+      } else {
+        toast.error('Jog failed', { description: 'Backend not reachable' })
+      }
     } finally {
       setSending(false)
     }
@@ -31,7 +69,8 @@ function JogPanel({ robot }: { robot: Robot }) {
     <div className="bg-[#161b22] border border-[#30363d] rounded-lg p-4">
       <h3 className="text-xs text-[#8b949e] mb-3 font-medium uppercase tracking-wide">Manual Jog</h3>
       <p className="text-[#6e7681] text-xs mb-3">
-        Jog commands sent via CTRL port when SIM_MODE=false. No-op in sim.
+        Each click sends one short pulse (POST /jog). Velocities are clamped to safe limits.
+        Refused while the robot has an active task or is unhealthy.
       </p>
 
       {/* Direction pad */}
@@ -82,7 +121,7 @@ function JackPanel({ robot }: { robot: Robot }) {
     try {
       // DO IDs from controle_completo_robo.py defaults
       const doId = action === 'up' ? 1 : 2
-      const r = await fetch('http://localhost:8765/setdo', {
+      const r = await fetch(`${fleetBaseUrl()}/setdo`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ robot_id: robot.id, do_id: doId, status: true }),

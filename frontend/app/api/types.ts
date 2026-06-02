@@ -83,3 +83,73 @@ export interface CBMsg    { type: 'callbutton';   station: Station }
 export interface AlarmMsg { type: 'alarm';        level: string; message: string; robot_id: string | null; ts: number }
 
 export type FleetMsg = WorldMsg | MapMsg | TaskMsg | CBMsg | AlarmMsg
+
+// ── Manual control / analytics (Sprint endpoints) ─────────────────────────────
+
+/** POST /jog → {ok, robot_id, vx, vy, w, duration, clamped, halted} */
+export interface JogResult {
+  ok: boolean
+  robot_id: string
+  vx: number
+  vy: number
+  w: number
+  duration: number | null
+  clamped: boolean
+  halted: boolean
+}
+
+/** POST /stop_all → {halted:true, cancelled:[...], note} */
+export interface StopAllResult {
+  halted: boolean
+  cancelled: string[]
+  note: string
+}
+
+/** POST /resume → {halted:false} */
+export interface ResumeResult {
+  halted: boolean
+}
+
+/** GET /stats/summary */
+export interface StatsSummary {
+  tasks_completed_today: number
+  tasks_failed_today: number
+  avg_task_duration_s: number | null
+  fleet_total: number
+  fleet_active: number
+  fleet_utilization: number
+  avg_battery: number | null
+  halted: boolean
+}
+
+export interface TelemetryRow {
+  ts: number
+  x: number
+  y: number
+  battery: number
+  status: string
+}
+
+/** GET /telemetry/robots/<id> */
+export interface RobotTelemetry {
+  robot_id: string
+  count: number
+  rows: TelemetryRow[]
+}
+
+export interface TaskHistoryRow {
+  id: string
+  pickup: string
+  dropoff: string
+  robot: string | null
+  state: string
+  created_ts: number | null
+  finished_ts: number | null
+  duration_s: number | null
+}
+
+/** GET /tasks/history */
+export interface TasksHistory {
+  count: number
+  tasks: TaskHistoryRow[]
+}
