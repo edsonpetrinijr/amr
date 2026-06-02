@@ -49,6 +49,7 @@ from .opcua import OpcUaCallbuttonDriver
 from .provider import SimProvider
 from .seer import SeerProvider
 from .smap import load_map, validate_stations
+from . import preflight
 
 logging.basicConfig(
     level=logging.INFO,
@@ -257,6 +258,19 @@ def _startup() -> None:
     opcua_driver = OpcUaCallbuttonDriver(_dispatcher)
     opcua_driver.start()
 
+    # ── Preflight readiness — fail loud if the config can't support a pilot ──
+    pf = preflight.validate(config.STATIONS, config.PAIRS, config.SIM_MODE, _map_model)
+    if not pf.ok:
+        for issue in pf.issues:
+            log.error("preflight BLOCKED: %s", issue)
+        _sync_broadcast(alarm_msg(
+            "critical",
+            "Preflight blocked — pilot not ready: " + "; ".join(pf.issues),
+            None,
+        ))
+    else:
+        log.info("preflight: readiness ok")
+
     log.info("Caterpillar Inc. Fleet backend started (sim_mode=%s)", config.SIM_MODE)
 
 
@@ -316,12 +330,15 @@ def _cors(response):
 
 @app.route("/health")
 def health():
+    pf = preflight.validate(config.STATIONS, config.PAIRS, config.SIM_MODE, _map_model)
     return jsonify({
         "status": "ok",
         "sim_mode": config.SIM_MODE,
         "version": "0.1.0",
         "robots": len(_dispatcher.provider.robots) if _dispatcher else 0,
         "sse_clients": len(_subscribers),
+        "readiness": pf.readiness,
+        "issues": pf.issues,
     })
 
 
@@ -452,10 +469,11 @@ def relocalize():
     y     = float(body.get("y",     0))
     theta = float(body.get("theta", 0))
     log.info("relocalize: robot=%s x=%.3f y=%.3f theta=%.3f", rid, x, y, theta)
-    if not config.SIM_MODE and hasattr(_dispatcher.provider, 'relocalize'):
+    if _dispatcher and hasattr(_dispatcher.provider, 'relocalize'):
         ok = _dispatcher.provider.relocalize(rid, x, y, theta)
-        return jsonify({"ok": ok, "note": "hardware command sent" if ok else "command failed"})
-    return jsonify({"ok": True, "note": "sim mode — no hardware command sent"})
+        note = "hardware command sent" if not config.SIM_MODE else "sim relocalize"
+        return jsonify({"ok": ok, "note": note if ok else "command failed"})
+    return jsonify({"ok": True, "note": "no relocalize support on provider"})
 
 
 # ── Operator controls: manual jog / software STOP-ALL ─────────────────────────

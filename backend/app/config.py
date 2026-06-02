@@ -52,14 +52,18 @@ if _opcua_raw:
 #   ap         — Action Point (SEER); pickup/dropoff with orientation
 STATIONS = [
     {"id": "BASE",  "type": "base",       "label": "Base",            "x": 50, "y": 92, "seer_lm": "LM1",  "ap_id": None,  "opcua_node": None},
-    {"id": "CB1",   "type": "callbutton", "label": "Linha A · Posto 1","x": 12, "y": 18, "seer_lm": "LM10", "ap_id": None,  "opcua_node": "ns=2;s=CallButton.CB1"},
+    # CB1 is the pilot pair's consumer (AP1↔CB1). Its real OPC UA bindings
+    # (boolBTN012/022) match AP1's boolBTN0xx scheme. NOTE: a duplicate "CB1"
+    # entry (placeholder ns=2;s=CallButton.CB1, no opcua_ret) was removed — it
+    # silently shadowed this one in _load_stations and broke preflight uniqueness.
+    # FLAG for Product: confirm the boolBTN012/022 node ids are the live buttons.
+    {"id": "CB1",   "type": "callbutton", "label": "Linha A · Posto 1","x": 12, "y": 18, "seer_lm": "LM10", "ap_id": None,  "opcua_node": "ns=1;s=boolBTN012", "opcua_ret": "ns=1;s=boolBTN022"},
     {"id": "CB2",   "type": "callbutton", "label": "Linha A · Posto 2","x": 30, "y": 12, "seer_lm": "LM11", "ap_id": None,  "opcua_node": "ns=2;s=CallButton.CB2"},
     {"id": "CB3",   "type": "callbutton", "label": "Linha B · Posto 1","x": 55, "y": 14, "seer_lm": "LM12", "ap_id": None,  "opcua_node": "ns=2;s=CallButton.CB3"},
     {"id": "CB4",   "type": "callbutton", "label": "Linha B · Posto 2","x": 78, "y": 20, "seer_lm": "LM13", "ap_id": None,  "opcua_node": "ns=2;s=CallButton.CB4"},
     {"id": "CB5",   "type": "callbutton", "label": "Linha C · Posto 1","x": 86, "y": 48, "seer_lm": "LM14", "ap_id": None,  "opcua_node": "ns=2;s=CallButton.CB5"},
     {"id": "CB6",   "type": "callbutton", "label": "Linha C · Posto 2","x": 70, "y": 62, "seer_lm": "LM15", "ap_id": None,  "opcua_node": "ns=2;s=CallButton.CB6"},
     {"id": "AP1",   "type": "ap",         "label": "Almox · Doca 1",  "x": 18, "y": 58, "seer_lm": "LM20", "ap_id": "AP1", "opcua_node": "ns=1;s=boolBTN011", "opcua_ret": "ns=1;s=boolBTN021"},
-    {"id": "CB1",   "type": "callbutton", "label": "Linha A · Posto 1","x": 12, "y": 18, "seer_lm": "LM10", "ap_id": None,  "opcua_node": "ns=1;s=boolBTN012", "opcua_ret": "ns=1;s=boolBTN022"},
 ]
 
 # Pairs: supplier (quem faz a peça) → consumer (quem precisa da peça)
@@ -94,6 +98,22 @@ STUCK_TIMEOUT_S       = float(os.getenv("STUCK_TIMEOUT_S", "30.0"))        # s �
 PROGRESS_EPS          = float(os.getenv("PROGRESS_EPS", "1.0"))            # units moved that counts as progress
 MAX_TASK_RETRIES      = int(os.getenv("MAX_TASK_RETRIES", "2"))            # re-queue attempts before T_FAILED
 ROBOT_COOLDOWN_S      = float(os.getenv("ROBOT_COOLDOWN_S", "20.0"))       # s — failed robot not retried on same task
+
+# ── SimProvider localization model (high-fidelity sim of SEER loc quality) ──
+# The sim keeps a ground-truth pose (motion physics) and a reported est_pose so
+# the recovery FSM is genuinely exercised. Units are the sim's 0..100 space,
+# treated as metres for threshold purposes. All env-overridable so tests can
+# force fast, deterministic transitions.
+LOC_CONFIDENCE_DECAY_RATE     = float(os.getenv("LOC_CONFIDENCE_DECAY_RATE", "0.15"))   # /s — confidence trends up (OK) / down (DEGRADED,LOST)
+LOC_DRIFT_RATE_OK             = float(os.getenv("LOC_DRIFT_RATE_OK", "0.05"))           # m/s — est noise amplitude in OK
+LOC_DRIFT_RATE_DEGRADED       = float(os.getenv("LOC_DRIFT_RATE_DEGRADED", "0.3"))      # m/s — est drift in DEGRADED
+LOC_DRIFT_RATE_LOST           = float(os.getenv("LOC_DRIFT_RATE_LOST", "1.5"))          # m/s — est drift in LOST
+LOC_LOST_CONFIDENCE_THRESHOLD = float(os.getenv("LOC_LOST_CONFIDENCE_THRESHOLD", "0.3"))
+NAV_FAIL_POSE_ERROR_THRESHOLD_M = float(os.getenv("NAV_FAIL_POSE_ERROR_THRESHOLD_M", "3.0"))  # m — est↔true error that blocks nav
+LOC_STUCK_TIMEOUT_S           = float(os.getenv("LOC_STUCK_TIMEOUT_S", "5.0"))          # s — pose-error past threshold → blocked
+LOC_NAV_FAIL_TIMEOUT_S        = float(os.getenv("LOC_NAV_FAIL_TIMEOUT_S", "10.0"))      # s — pose-error past threshold → nav_failed
+RELOCALIZE_SUCCESS_RADIUS_M   = float(os.getenv("RELOCALIZE_SUCCESS_RADIUS_M", "1.0"))  # m — seed within this of true pose → success
+RELOCALIZE_SUCCESS_THETA_DEG  = float(os.getenv("RELOCALIZE_SUCCESS_THETA_DEG", "30.0"))  # deg — heading tolerance for relocalize
 
 # ── Operator manual controls & analytics queries (single-plant pilot) ───────
 # Manual JOG safety envelope. vx/vy/w are clamped to ±MAX before being sent to
