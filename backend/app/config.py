@@ -16,7 +16,34 @@ DB_PATH = os.getenv("FLEET_DB", os.path.join(os.path.dirname(__file__), "..", "f
 
 # ── OPC UA (callbuttons, owned by Adilson) ──────────────────────────────────
 # Filled in Fase 3. Until then sim-mode fakes button presses.
-OPCUA_ENDPOINT = os.getenv("OPCUA_ENDPOINT", "")  # e.g. "opc.tcp://10.0.0.5:4840"
+OPCUA_ENDPOINT = os.getenv("OPCUA_ENDPOINT", "")  # e.g. "opc.tcp://10.0.0.5:4840/fleet"
+
+# Driver hardening knobs — all env-overridable so tests can shrink them.
+#   OPCUA_DEBOUNCE_S      — ignore repeat rising edges on a node within this window
+#                           (kills bounce/chatter from a noisy or held button).
+#   OPCUA_RECONNECT_MIN_S — first reconnect wait after a drop (doubles each retry).
+#   OPCUA_RECONNECT_MAX_S — cap for the exponential reconnect backoff.
+#   OPCUA_SUB_PERIOD_MS   — subscription publish interval requested from the server.
+#   OPCUA_HEALTH_S        — how often we ping the server to detect a silent drop.
+OPCUA_DEBOUNCE_S      = float(os.getenv("OPCUA_DEBOUNCE_S", "1.0"))
+OPCUA_RECONNECT_MIN_S = float(os.getenv("OPCUA_RECONNECT_MIN_S", "1.0"))
+OPCUA_RECONNECT_MAX_S = float(os.getenv("OPCUA_RECONNECT_MAX_S", "30.0"))
+OPCUA_SUB_PERIOD_MS   = float(os.getenv("OPCUA_SUB_PERIOD_MS", "200"))
+OPCUA_HEALTH_S        = float(os.getenv("OPCUA_HEALTH_S", "2.0"))
+
+# Explicit node → (station_id, direction) mapping override. JSON object keyed by
+# OPC UA node-id string, value [station_id, direction]. When empty the driver
+# derives the map from STATIONS (opcua_node→fwd, opcua_ret→ret). Example:
+#   OPCUA_NODE_MAP='{"ns=2;s=CallButton.CB1": ["CB1","fwd"]}'
+import json as _json
+OPCUA_NODE_MAP: dict[str, tuple[str, str]] = {}
+_opcua_raw = os.getenv("OPCUA_NODE_MAP", "").strip()
+if _opcua_raw:
+    try:
+        OPCUA_NODE_MAP = {str(k): (str(v[0]), str(v[1])) for k, v in _json.loads(_opcua_raw).items()}
+    except Exception as _e:  # noqa: BLE001 — bad config must not crash the backend
+        print(f"[config] ignoring invalid OPCUA_NODE_MAP: {_e}")
+        OPCUA_NODE_MAP = {}
 
 # ── Stations ────────────────────────────────────────────────────────────────
 # type: "callbutton" | "base" | "ap"
