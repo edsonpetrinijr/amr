@@ -31,13 +31,19 @@ STATIONS = [
     {"id": "CB4",   "type": "callbutton", "label": "Linha B · Posto 2","x": 78, "y": 20, "seer_lm": "LM13", "ap_id": None,  "opcua_node": "ns=2;s=CallButton.CB4"},
     {"id": "CB5",   "type": "callbutton", "label": "Linha C · Posto 1","x": 86, "y": 48, "seer_lm": "LM14", "ap_id": None,  "opcua_node": "ns=2;s=CallButton.CB5"},
     {"id": "CB6",   "type": "callbutton", "label": "Linha C · Posto 2","x": 70, "y": 62, "seer_lm": "LM15", "ap_id": None,  "opcua_node": "ns=2;s=CallButton.CB6"},
-    {"id": "AP1",   "type": "ap",         "label": "Almox · Doca 1",  "x": 18, "y": 58, "seer_lm": "LM20", "ap_id": "AP1", "opcua_node": None},
-    {"id": "AP2",   "type": "ap",         "label": "Almox · Doca 2",  "x": 35, "y": 72, "seer_lm": "LM21", "ap_id": "AP2", "opcua_node": None},
-    {"id": "AP3",   "type": "ap",         "label": "Expedição",       "x": 60, "y": 80, "seer_lm": "LM22", "ap_id": "AP3", "opcua_node": None},
+    {"id": "AP1",   "type": "ap",         "label": "Almox · Doca 1",  "x": 18, "y": 58, "seer_lm": "LM20", "ap_id": "AP1", "opcua_node": "ns=1;s=boolBTN011", "opcua_ret": "ns=1;s=boolBTN021"},
+    {"id": "CB1",   "type": "callbutton", "label": "Linha A · Posto 1","x": 12, "y": 18, "seer_lm": "LM10", "ap_id": None,  "opcua_node": "ns=1;s=boolBTN012", "opcua_ret": "ns=1;s=boolBTN022"},
 ]
 
-# Default supply point a callbutton task picks from (where the part lives).
-DEFAULT_SUPPLY = "AP1"
+# Pairs: supplier (quem faz a peça) → consumer (quem precisa da peça)
+# Ambos precisam apertar o botão para o AMR ser despachado.
+PAIRS = [
+    {
+        "supplier": "AP1", "consumer": "CB1",
+        "fwd_label": "Almox → Linha",   # LM1 → LM2
+        "ret_label": "Linha → Almox",   # LM2 → LM1
+    }
+]
 
 # ── Robots ──────────────────────────────────────────────────────────────────
 # Real deployment: 9 operational AMRs (1 of 10 is educational). Each gets an IP

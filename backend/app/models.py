@@ -26,10 +26,10 @@ T_CANCELLED = "cancelled"
 T_FAILED = "failed"
 
 # Callbutton states
-CB_IDLE = "idle"
-CB_CALLED = "called"
-CB_ACKED = "acknowledged"
-CB_SERVED = "served"
+CB_IDLE   = "idle"
+CB_READY  = "ready"    # este lado apertou, aguardando o par
+CB_CALLED = "called"   # ambos prontos, AMR despachado
+CB_SERVED = "served"   # tarefa concluída
 
 
 @dataclass
@@ -64,7 +64,8 @@ class Station:
     seer_lm: Optional[str] = None
     ap_id: Optional[str] = None
     opcua_node: Optional[str] = None
-    cb_state: str = CB_IDLE     # only meaningful for type == "callbutton"
+    cb_state: str = CB_IDLE
+    cb_dir: Optional[str] = None   # "fwd" | "ret" | None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -80,13 +81,39 @@ class Task:
     dropoff: str                # station id (destination)
     state: str = T_PENDING
     robot: Optional[str] = None
+    facility_id: str = "piracicaba"
     created_at: float = field(default_factory=time.time)
     assigned_at: Optional[float] = None
     done_at: Optional[float] = None
 
     @staticmethod
-    def new(pickup: str, dropoff: str) -> "Task":
-        return Task(id=f"T{next(_task_counter):04d}", pickup=pickup, dropoff=dropoff)
+    def new(pickup: str, dropoff: str, facility_id: str = "piracicaba") -> "Task":
+        return Task(id=f"T{next(_task_counter):04d}", pickup=pickup, dropoff=dropoff, facility_id=facility_id)
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+# ── WebSocket message types ────────────────────────────────────────────────────
+# Server → client
+
+def world_snapshot(robots: list[Robot], stations: list[Station], tasks_active: list[Task]) -> dict:
+    return {
+        "type": "world",
+        "ts": time.time(),
+        "robots": [r.to_dict() for r in robots],
+        "stations": [s.to_dict() for s in stations],
+        "tasks_active": [t.to_dict() for t in tasks_active if t.state not in (T_DONE, T_CANCELLED, T_FAILED)],
+    }
+
+
+def task_update_msg(task: Task, event: str) -> dict:
+    return {"type": "task_update", "event": event, "task": task.to_dict()}
+
+
+def callbutton_msg(station: Station) -> dict:
+    return {"type": "callbutton", "station": station.to_dict()}
+
+
+def alarm_msg(level: str, message: str, robot_id: Optional[str] = None) -> dict:
+    return {"type": "alarm", "level": level, "message": message, "robot_id": robot_id, "ts": time.time()}

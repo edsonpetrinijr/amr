@@ -1,7 +1,6 @@
 import { app, BrowserWindow } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
-import { startWSBridge } from './ws-bridge'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -38,10 +37,11 @@ function createWindow() {
     win.loadFile(path.join(RENDERER_DIST, 'index.html'))
   }
 
-  // Start ML WebSocket bridge after renderer is ready
+  // Start Fleet backend bridge after renderer is ready
   const _win = win;
   _win.webContents.once('did-finish-load', () => {
-    startWSBridge(_win)
+    // Fleet WS bridge wired in Phase 1
+    console.log('[fleet] renderer ready')
   })
 }
 

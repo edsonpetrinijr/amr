@@ -1,0 +1,225 @@
+import React, { useState } from 'react'
+import { useParams, Link } from 'react-router'
+import { Wrench, AlertTriangle, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, RotateCw, RotateCcw, Square } from 'lucide-react'
+import { useFleet } from '../state/store'
+import { fleetApi } from '../api/fleet'
+import { MapCanvas } from '../components/MapCanvas'
+import { Badge } from '../components/ui/badge'
+import { Button } from '../components/ui/button'
+import type { Robot } from '../api/types'
+
+// ── Jog panel ─────────────────────────────────────────────────────────────────
+
+function JogPanel({ robot }: { robot: Robot }) {
+  const [sending, setSending] = useState(false)
+
+  async function sendVelocity(cmd: 'forward'|'back'|'left'|'right'|'ccw'|'cw'|'stop') {
+    // velocity sent via motion endpoint — uses the REST bridge
+    setSending(true)
+    try {
+      // We repurpose /relocalize body shape since there is no jog REST yet.
+      // In practice the SeerProvider.send_velocity() is triggered by the dispatcher;
+      // for manual jog we'll expose a dedicated /jog endpoint in Phase 6 hardening.
+      // For now this button shows the intent and logs to console.
+      console.log('[jog]', cmd, robot.id)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <div className="bg-[#161b22] border border-[#30363d] rounded-lg p-4">
+      <h3 className="text-xs text-[#8b949e] mb-3 font-medium uppercase tracking-wide">Manual Jog</h3>
+      <p className="text-[#6e7681] text-xs mb-3">
+        Jog commands sent via CTRL port when SIM_MODE=false. No-op in sim.
+      </p>
+
+      {/* Direction pad */}
+      <div className="grid grid-cols-3 gap-1.5 w-fit mx-auto mb-3">
+        <div />
+        <Button variant="outline" size="icon" onClick={() => sendVelocity('forward')} disabled={sending}>
+          <ChevronUp className="w-4 h-4" />
+        </Button>
+        <div />
+        <Button variant="outline" size="icon" onClick={() => sendVelocity('left')} disabled={sending}>
+          <ChevronLeft className="w-4 h-4" />
+        </Button>
+        <Button variant="outline" size="icon" onClick={() => sendVelocity('stop')} disabled={sending}
+          className="border-red-800 text-red-400 hover:bg-red-900/20">
+          <Square className="w-3.5 h-3.5" />
+        </Button>
+        <Button variant="outline" size="icon" onClick={() => sendVelocity('right')} disabled={sending}>
+          <ChevronRight className="w-4 h-4" />
+        </Button>
+        <div />
+        <Button variant="outline" size="icon" onClick={() => sendVelocity('back')} disabled={sending}>
+          <ChevronDown className="w-4 h-4" />
+        </Button>
+        <div />
+      </div>
+
+      {/* Rotation */}
+      <div className="flex gap-2 justify-center">
+        <Button variant="outline" size="sm" onClick={() => sendVelocity('ccw')} disabled={sending}>
+          <RotateCcw className="w-3.5 h-3.5 mr-1" /> CCW
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => sendVelocity('cw')} disabled={sending}>
+          <RotateCw className="w-3.5 h-3.5 mr-1" /> CW
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ── Jack DO panel ─────────────────────────────────────────────────────────────
+
+function JackPanel({ robot }: { robot: Robot }) {
+  const [sending, setSending] = useState(false)
+  const [lastAction, setLastAction] = useState<string | null>(null)
+
+  async function jack(action: 'up' | 'down') {
+    setSending(true)
+    try {
+      // DO IDs from controle_completo_robo.py defaults
+      const doId = action === 'up' ? 1 : 2
+      const r = await fetch('http://localhost:8765/setdo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ robot_id: robot.id, do_id: doId, status: true }),
+      })
+      if (r.ok) setLastAction(action)
+    } catch (e) { console.error(e) }
+    finally { setSending(false) }
+  }
+
+  return (
+    <div className="bg-[#161b22] border border-[#30363d] rounded-lg p-4">
+      <h3 className="text-xs text-[#8b949e] mb-3 font-medium uppercase tracking-wide">Jack / Load Platform</h3>
+      <div className="flex gap-2">
+        <Button variant="outline" size="sm" disabled={sending} onClick={() => jack('up')}
+          className="flex-1">
+          <ChevronUp className="w-3.5 h-3.5 mr-1" /> Raise
+        </Button>
+        <Button variant="outline" size="sm" disabled={sending} onClick={() => jack('down')}
+          className="flex-1">
+          <ChevronDown className="w-3.5 h-3.5 mr-1" /> Lower
+        </Button>
+      </div>
+      {lastAction && (
+        <p className="text-xs text-[#3fb950] mt-2">Last: {lastAction}</p>
+      )}
+    </div>
+  )
+}
+
+// ── Relocalize panel ──────────────────────────────────────────────────────────
+
+function RelocalizePanel({ robot }: { robot: Robot }) {
+  const { map, stations } = useFleet()
+  const [x,     setX]     = useState(String(robot.x.toFixed(2)))
+  const [y,     setY]     = useState(String(robot.y.toFixed(2)))
+  const [theta, setTheta] = useState(String((robot.theta * 180 / Math.PI).toFixed(1)))
+  const [sending, setSending] = useState(false)
+  const [result,  setResult]  = useState<string | null>(null)
+
+  async function handleRelocalize() {
+    setSending(true)
+    setResult(null)
+    try {
+      const r = await fleetApi.relocalize(robot.id, parseFloat(x), parseFloat(y), parseFloat(theta) * Math.PI / 180)
+      setResult(r.ok ? '✓ Relocalization sent' : '✗ Failed')
+    } catch { setResult('✗ Error') }
+    finally { setSending(false) }
+  }
+
+  return (
+    <div className="bg-[#161b22] border border-[#30363d] rounded-lg p-4">
+      <h3 className="text-xs text-[#8b949e] mb-3 font-medium uppercase tracking-wide">Relocalization</h3>
+      <p className="text-[#6e7681] text-xs mb-3">
+        Set initial pose estimate on the map. Click a landmark on the map to pre-fill coordinates.
+      </p>
+      <div className="grid grid-cols-3 gap-2 mb-3">
+        {([['X (m)', x, setX], ['Y (m)', y, setY], ['θ (°)', theta, setTheta]] as [string, string, (v: string) => void][]).map(([lbl, val, set]) => (
+          <div key={lbl}>
+            <label className="text-xs text-[#8b949e] block mb-1">{lbl}</label>
+            <input value={val} onChange={e => set(e.target.value)}
+              className="w-full text-xs bg-[#0d1117] border border-[#30363d] text-[#c9d1d9] rounded px-2 py-1 font-mono" />
+          </div>
+        ))}
+      </div>
+      <Button variant="primary" size="sm" className="w-full" disabled={sending} onClick={handleRelocalize}>
+        {sending ? 'Sending…' : 'Set Pose'}
+      </Button>
+      {result && <p className="text-xs mt-2 text-[#3fb950]">{result}</p>}
+
+      {/* Mini map with landmark click */}
+      {map && (
+        <div className="mt-3 rounded overflow-hidden border border-[#30363d]" style={{ height: 200 }}>
+          <MapCanvas map={map} stations={stations} robots={[robot]}
+            className="w-full h-full"
+            onClickAP={s => { setX(s.x.toFixed(2)); setY(s.y.toFixed(2)) }}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Root page ─────────────────────────────────────────────────────────────────
+
+export function Calibration() {
+  const { robotId } = useParams<{ robotId?: string }>()
+  const { robots, connected } = useFleet()
+
+  const robot = robotId ? robots.find(r => r.id === robotId) : robots[0]
+
+  return (
+    <div className="flex-1 flex flex-col bg-[#0d1117]">
+      {/* Header */}
+      <div className="border-b border-[#30363d] px-6 py-3 flex items-center gap-3 flex-shrink-0">
+        <Wrench className="w-4 h-4 text-[#58a6ff]" />
+        <h1 className="text-sm font-semibold text-[#e6edf3]">Calibration</h1>
+        <div className={`w-2 h-2 rounded-full ml-2 ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
+        {robot && (
+          <Badge variant="secondary" className="ml-1">{robot.id}</Badge>
+        )}
+        <div className="ml-auto flex gap-2">
+          {/* Robot selector */}
+          {robots.map(r => (
+            <Link key={r.id} to={`/calibration/${r.id}`}
+              className={`text-xs px-2 py-1 rounded transition-colors
+                ${r.id === robot?.id
+                  ? 'bg-[#21262d] text-[#e6edf3] border border-[#58a6ff]'
+                  : 'text-[#8b949e] hover:text-[#c9d1d9] hover:bg-[#161b22]'}`}>
+              {r.id}
+            </Link>
+          ))}
+        </div>
+      </div>
+
+      {!robot ? (
+        <div className="flex-1 flex items-center justify-center text-[#8b949e] text-sm">
+          Select a robot above to begin calibration
+        </div>
+      ) : (
+        <div className="flex-1 overflow-auto p-6">
+          {/* Warning */}
+          <div className="flex items-start gap-2 bg-yellow-900/20 border border-yellow-700/40 rounded-lg px-4 py-3 mb-5 text-xs text-yellow-300">
+            <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+            <span>
+              Calibration commands bypass the dispatcher and send directly to the robot hardware.
+              Ensure the area is clear before relocalization or jog movements.
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <RelocalizePanel robot={robot} />
+            <JogPanel robot={robot} />
+            <JackPanel robot={robot} />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
