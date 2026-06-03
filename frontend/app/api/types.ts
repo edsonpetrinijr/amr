@@ -86,7 +86,19 @@ export interface WorldMsg {
 export interface MapMsg   { type: 'map';          map: MapModel }
 export interface TaskMsg  { type: 'task_update';  event: string; task: Task }
 export interface CBMsg    { type: 'callbutton';   station: Station }
-export interface AlarmMsg { type: 'alarm';        level: string; message: string; robot_id: string | null; ts: number }
+
+/** Structured recovery alarm payload (present only on actionable loc-recovery alarms). */
+export interface RelocalizeAssistPayload {
+  robot_id: string
+  task_id: string | null
+  reason: 'NAV_FAILED' | 'STUCK' | 'LOW_CONFIDENCE'
+  last_pose: { x: number | null; y: number | null; theta: number | null; confidence: number | null }
+  action: 'RELOCALIZE_ASSIST_V1'
+  suggestions_url: string
+  timestamp: number
+  incident_id: string
+}
+export interface AlarmMsg { type: 'alarm';        level: string; message: string; robot_id: string | null; ts: number; payload?: RelocalizeAssistPayload }
 
 export type FleetMsg = WorldMsg | MapMsg | TaskMsg | CBMsg | AlarmMsg
 
