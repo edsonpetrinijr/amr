@@ -5,6 +5,7 @@ import type { FleetMsg, Task } from './types'
 import type {
   JogResult, StopAllResult, ResumeResult,
   StatsSummary, RobotTelemetry, TasksHistory, LaserScan,
+  RelocalizeSuggestionsResponse,
 } from './types'
 
 const BASE: string = import.meta.env?.VITE_FLEET_URL ?? 'http://localhost:8765'
@@ -133,6 +134,18 @@ export const fleetApi = {
 
   relocalize: (robot_id: string, x: number, y: number, theta: number) =>
     _json('/relocalize', { method: 'POST', body: JSON.stringify({ robot_id, x, y, theta }) }),
+
+  /** GET /relocalize/suggestions — nearest map landmarks to where the system
+   *  thinks the robot is. Pass robotId (preferred) OR explicit x & y. Throws
+   *  FleetApiError on 409 (no map) / 404 (pose unavailable) / 400 (missing params). */
+  getRelocalizeSuggestions: (params: { robotId?: string; x?: number; y?: number; k?: number }) => {
+    const p = new URLSearchParams()
+    if (params.robotId != null) p.set('robot_id', params.robotId)
+    if (params.x != null)       p.set('x', String(params.x))
+    if (params.y != null)       p.set('y', String(params.y))
+    if (params.k != null)       p.set('k', String(params.k))
+    return _jsonOrError(`/api/relocalize/suggestions?${p.toString()}`) as Promise<RelocalizeSuggestionsResponse>
+  },
 
   // ── Manual control ──────────────────────────────────────────────────────────
 

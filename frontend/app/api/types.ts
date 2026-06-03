@@ -102,6 +102,28 @@ export interface AlarmMsg { type: 'alarm';        level: string; message: string
 
 export type FleetMsg = WorldMsg | MapMsg | TaskMsg | CBMsg | AlarmMsg
 
+// ── Relocalization assist (GET /relocalize/suggestions) ───────────────────────
+
+/** One nearby map landmark. NOTE: landmarks carry no real name/theta —
+ *  `name === lm_id` and `theta` may be null. */
+export interface RelocalizeSuggestion {
+  lm_id: string
+  name: string
+  x: number
+  y: number
+  theta: number | null
+  dist_m: number
+}
+
+/** GET /relocalize/suggestions → nearest landmarks to the pose the system
+ *  believes the robot is at. */
+export interface RelocalizeSuggestionsResponse {
+  frame: string
+  source: 'robot_state' | 'explicit_pose'
+  pose_used: { x: number; y: number; theta: number | null; confidence: number | null }
+  suggestions: RelocalizeSuggestion[]
+}
+
 // ── Manual control / analytics (Sprint endpoints) ─────────────────────────────
 
 /** POST /jog → {ok, robot_id, vx, vy, w, duration, clamped, halted} */
