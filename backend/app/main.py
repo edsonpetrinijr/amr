@@ -43,6 +43,8 @@ if _env_file.exists():
 from flask import Flask, Response, jsonify, request, stream_with_context
 
 from . import config, db, telemetry
+from . import store
+from . import opcua as opcua
 from .dispatcher import Dispatcher
 from .models import world_snapshot, alarm_msg, task_update_msg, IDLE, OFFLINE, CHARGING
 from .opcua import OpcUaCallbuttonDriver
@@ -50,6 +52,17 @@ from .provider import SimProvider
 from .seer import SeerProvider
 from .smap import load_map, validate_stations
 from . import preflight
+
+# `opcua.probe_node` is delivered by the integration engineer. Provide a tiny
+# graceful fallback ONLY if absent so main.py imports/runs before that lands.
+# Tests monkeypatch `opcua.probe_node`, which works either way.
+if not hasattr(opcua, "probe_node"):
+    def _probe_node_fallback(node_id, endpoint=None, timeout=3.0):  # noqa: ANN001
+        ep = endpoint if endpoint is not None else getattr(config, "OPCUA_ENDPOINT", "")
+        return {"ok": False, "value": None,
+                "error": None if not ep else "probe_node not implemented",
+                "configured": bool(ep), "endpoint": ep}
+    opcua.probe_node = _probe_node_fallback  # type: ignore[attr-defined]
 
 logging.basicConfig(
     level=logging.INFO,
@@ -63,6 +76,7 @@ app = Flask(__name__)
 
 _dispatcher: Optional[Dispatcher] = None
 _map_model  = None
+_opcua_driver = None   # OpcUaCallbuttonDriver instance (set in _startup)
 
 # Each SSE subscriber gets its own queue
 _subscribers: list[queue.Queue] = []
@@ -200,9 +214,13 @@ def _telemetry_sampler_loop() -> None:
 
 
 def _startup() -> None:
-    global _dispatcher, _map_model
+    global _dispatcher, _map_model, _opcua_driver
 
     db.init()
+
+    # Hydrate persisted device/station overrides BEFORE building provider/dispatcher
+    # so the fleet and station OPC UA bindings reflect operator edits across restarts.
+    store.load_into_config()
 
     smap_path = os.getenv(
         "SMAP_PATH",
@@ -263,6 +281,7 @@ def _startup() -> None:
     # OPC UA callbutton driver (starts only if OPCUA_ENDPOINT is set and asyncua present)
     opcua_driver = OpcUaCallbuttonDriver(_dispatcher)
     opcua_driver.start()
+    _opcua_driver = opcua_driver
 
     # ── Preflight readiness — fail loud if the config can't support a pilot ──
     pf = preflight.validate(config.STATIONS, config.PAIRS, config.SIM_MODE, _map_model)
@@ -330,7 +349,7 @@ def sse_stream():
 def _cors(response):
     response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type"
-    response.headers["Access-Control-Allow-Methods"] = "GET,POST,DELETE,OPTIONS"
+    response.headers["Access-Control-Allow-Methods"] = "GET,POST,PUT,DELETE,OPTIONS"
     return response
 
 
@@ -406,6 +425,129 @@ def get_robot_laser(robot_id: str):
     if not hasattr(provider, "laser"):
         return jsonify({"beams": [], "ts": 0.0})
     return jsonify(provider.laser(robot_id))
+
+
+# ── Devices & callbuttons: robot CRUD + OPC UA config/diagnostics ─────────────
+
+def _find_robot_cfg(robot_id: str):
+    return next((r for r in config.ROBOTS if r.get("id") == robot_id), None)
+
+
+@app.route("/robots", methods=["POST", "OPTIONS"])
+def add_robot():
+    if request.method == "OPTIONS":
+        return "", 204
+    if not _dispatcher:
+        return jsonify({"error": "Dispatcher not ready"}), 503
+    body = request.get_json(force=True, silent=True) or {}
+    ip = str(body.get("ip", "")).strip()
+    if not ip:
+        return jsonify({"error": "ip required"}), 400
+    stored = store.add_robot({"ip": ip, "id": body.get("id"), "name": body.get("name")})
+    robot = _dispatcher.provider.add_robot(stored)
+    pulled = _dispatcher.provider.probe(robot.id)
+    return jsonify({
+        "robot": robot.to_dict(),
+        "connected": bool(pulled.get("connected")),
+        "pulled": pulled,
+    }), 201
+
+
+@app.route("/robots/<robot_id>", methods=["PUT", "OPTIONS"])
+def update_robot(robot_id: str):
+    if request.method == "OPTIONS":
+        return "", 204
+    if not _dispatcher:
+        return jsonify({"error": "Dispatcher not ready"}), 503
+    body = request.get_json(force=True, silent=True) or {}
+    stored = store.update_robot(robot_id, {"ip": body.get("ip"), "name": body.get("name")})
+    if stored is None:
+        return jsonify({"error": "Robot not found"}), 404
+    robot = _dispatcher.provider.update_robot(robot_id, ip=body.get("ip"), name=body.get("name"))
+    if robot is None:
+        return jsonify({"error": "Robot not found"}), 404
+    pulled = _dispatcher.provider.probe(robot_id)
+    return jsonify({
+        "robot": robot.to_dict(),
+        "connected": bool(pulled.get("connected")),
+        "pulled": pulled,
+    })
+
+
+@app.route("/robots/<robot_id>", methods=["DELETE"])
+def delete_robot(robot_id: str):
+    if not _dispatcher:
+        return jsonify({"error": "Dispatcher not ready"}), 503
+    if _find_robot_cfg(robot_id) is None and robot_id not in _dispatcher.provider.robots:
+        return jsonify({"error": "Robot not found"}), 404
+    store.delete_robot(robot_id)
+    _dispatcher.provider.remove_robot(robot_id)
+    return jsonify({"ok": True, "id": robot_id})
+
+
+@app.route("/robots/<robot_id>/probe", methods=["POST", "OPTIONS"])
+def probe_robot(robot_id: str):
+    if request.method == "OPTIONS":
+        return "", 204
+    if not _dispatcher:
+        return jsonify({"error": "Dispatcher not ready"}), 503
+    if robot_id not in _dispatcher.provider.robots:
+        return jsonify({"error": "Robot not found"}), 404
+    pulled = _dispatcher.provider.probe(robot_id)
+    return jsonify({"connected": bool(pulled.get("connected")), "pulled": pulled})
+
+
+@app.route("/stations/<station_id>", methods=["PUT", "OPTIONS"])
+def update_station(station_id: str):
+    if request.method == "OPTIONS":
+        return "", 204
+    if not _dispatcher:
+        return jsonify({"error": "Dispatcher not ready"}), 503
+    body = request.get_json(force=True, silent=True) or {}
+    ok = store.set_station_opcua(station_id, body.get("opcua_node"), body.get("opcua_ret"))
+    if not ok:
+        return jsonify({"error": "Station not found"}), 404
+    if "label" in body and body["label"] is not None:
+        for s in config.STATIONS:
+            if s["id"] == station_id:
+                s["label"] = body["label"]
+                break
+    _dispatcher.reload_stations()
+    # Re-apply the new node map to the running OPC UA driver (best-effort).
+    if _opcua_driver is not None:
+        try:
+            _opcua_driver.restart()
+        except Exception as exc:  # noqa: BLE001 — driver may be disabled
+            log.warning("opcua driver restart failed: %s", exc)
+    station = _dispatcher.stations.get(station_id)
+    return jsonify({"station": station.to_dict() if station else None})
+
+
+@app.route("/opcua/test", methods=["POST", "OPTIONS"])
+def opcua_test():
+    if request.method == "OPTIONS":
+        return "", 204
+    if not _dispatcher:
+        return jsonify({"error": "Dispatcher not ready"}), 503
+    body = request.get_json(force=True, silent=True) or {}
+    node = body.get("node")
+    if not node:
+        sid = body.get("station_id")
+        if sid:
+            st = _dispatcher.stations.get(sid)
+            node = st.opcua_node if st else None
+    if not node:
+        return jsonify({"error": "node or station_id required"}), 400
+    res = opcua.probe_node(node)
+    return jsonify({
+        "ok": bool(res.get("ok")),
+        "value": res.get("value"),
+        "error": res.get("error"),
+        "configured": bool(res.get("configured")),
+        "endpoint": res.get("endpoint"),
+        "node": node,
+    })
+
 
 
 @app.route("/tasks")
