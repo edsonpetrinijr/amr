@@ -1,3 +1,16 @@
+# Build artifacts
+dist
+dist-electron
+release
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+
+# Local database
+*.db
+
 # Logs
 logs
 *.log
@@ -80,7 +93,6 @@ out
 
 # Nuxt.js build / generate output
 .nuxt
-dist
 .output
 
 # Gatsby files
