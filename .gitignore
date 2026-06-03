@@ -11,8 +11,8 @@ __pycache__/
 # Local database
 *.db
 
-# Runtime persistent device store (written by backend/app/store.py; not seed data)
-backend/devices.json
+# Runtime persistent device store (written by server/app/store.py; not seed data)
+server/devices.json
 
 # Logs
 logs

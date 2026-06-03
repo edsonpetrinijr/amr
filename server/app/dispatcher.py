@@ -83,6 +83,21 @@ class Dispatcher:
 
         self._running = False
 
+        # ── Continuous jog (WASD streaming) ───────────────────────────────────
+        # robot_id → (vx, vy, w, expiry_monotonic). A background thread resends
+        # each target to the robot at JOG_RESEND_INTERVAL_S (the SEER velocity
+        # watchdog needs continuous commands) and auto-stops once expiry passes.
+        self._jog_targets: dict[str, tuple[float, float, float, float]] = {}
+        self._jog_lock = threading.Lock()
+        self._jog_thread: Optional[threading.Thread] = None
+        self._jog_thread_stop = threading.Event()
+
+        # ── Callbutton 2-press transport ──────────────────────────────────────
+        # First press records an origin; the next press on a DIFFERENT callbutton
+        # is the destination → a transport task is created. None when idle.
+        self._pending_origin: Optional[str] = None
+        self._pending_origin_ts: float = 0.0
+
     # ── Setup ─────────────────────────────────────────────────────────────────
 
     def _load_stations(self) -> dict[str, Station]:
@@ -134,75 +149,102 @@ class Dispatcher:
         return task
 
     def button_pressed(self, station_id: str, direction: str = "fwd") -> Task | None:
-        """Botão físico apertado. Só despacha quando AMBOS os lados confirmam a MESMA direção."""
+        """Callbutton pressed (physical or simulated). 2-press transport model:
+        the FIRST press records an origin (pickup); the next press on a DIFFERENT
+        callbutton is the destination (dropoff) → a transport task is created and
+        a robot is dispatched (origin LM → destination LM). Action Points were
+        removed; `direction` is accepted for OPC-UA compatibility but ignored.
+        Returns the created Task on the second press, else None."""
         station = self.stations.get(station_id)
-        if not station:
+        if not station or station.type != "callbutton":
             return None
 
-        pair = self._find_pair(station_id)
-        if not pair:
+        now = time.time()
+
+        # Drop a stale origin so it never lingers forever.
+        if self._pending_origin and (now - self._pending_origin_ts) > config.CALLBUTTON_ORIGIN_TIMEOUT_S:
+            self._clear_pending_origin()
+
+        # Pressing the SAME button that is the pending origin → cancel (toggle).
+        if self._pending_origin == station_id:
+            self._clear_pending_origin()
+            log.info("button_pressed: origem %s cancelada", station_id)
             return None
 
-        supplier = self.stations[pair["supplier"]]
-        consumer = self.stations[pair["consumer"]]
-
-        # Ignora se já tem task em andamento nesse par
-        if supplier.cb_state == CB_CALLED or consumer.cb_state == CB_CALLED:
-            log.info("button_pressed: task em andamento — ignorando %s", station_id)
-            return None
-
-        # Se estava pronto para outra direção, reseta
-        if station.cb_state == CB_READY and station.cb_dir != direction:
-            station.cb_state = CB_IDLE
+        # No pending origin → this press IS the origin (await destination).
+        if not self._pending_origin:
+            self._pending_origin = station_id
+            self._pending_origin_ts = now
+            station.cb_state = CB_READY
             station.cb_dir = None
+            asyncio.ensure_future(self._emit(callbutton_msg(station)))
+            log.info("button_pressed: origem=%s (aguardando destino)", station_id)
+            return None
 
-        station.cb_state = CB_READY
-        station.cb_dir = direction
-        asyncio.ensure_future(self._emit(callbutton_msg(station)))
-        log.info("button_pressed: %s pronto dir=%s (aguardando par)", station_id, direction)
+        # Have an origin + a different destination → create the transport.
+        origin_id = self._pending_origin
+        self._clear_pending_origin(emit=False)
+        task = self.create_task(pickup=origin_id, dropoff=station_id)
+        if task:
+            for sid in (origin_id, station_id):
+                st = self.stations.get(sid)
+                if st:
+                    st.cb_state = CB_CALLED
+                    st.cb_dir = None
+                    asyncio.ensure_future(self._emit(callbutton_msg(st)))
+            log.info("button_pressed: transporte %s→%s — task %s",
+                     origin_id, station_id, task.id)
+        else:
+            # Origin locked/invalid — reset both so the operator can retry.
+            for sid in (origin_id, station_id):
+                st = self.stations.get(sid)
+                if st:
+                    st.cb_state = CB_IDLE
+                    st.cb_dir = None
+                    asyncio.ensure_future(self._emit(callbutton_msg(st)))
+            log.info("button_pressed: transporte %s→%s recusado (origem ocupada?)",
+                     origin_id, station_id)
+        return task
 
-        partner = consumer if station_id == pair["supplier"] else supplier
-        if partner.cb_state == CB_READY and partner.cb_dir == direction:
-            supplier.cb_state = CB_CALLED
-            supplier.cb_dir = direction
-            consumer.cb_state = CB_CALLED
-            consumer.cb_dir = direction
-            asyncio.ensure_future(self._emit(callbutton_msg(supplier)))
-            asyncio.ensure_future(self._emit(callbutton_msg(consumer)))
-            # fwd: supplier→consumer / ret: consumer→supplier
-            if direction == "fwd":
-                task = self.create_task(pickup=pair["supplier"], dropoff=pair["consumer"])
-            else:
-                task = self.create_task(pickup=pair["consumer"], dropoff=pair["supplier"])
-            log.info("button_pressed: ambos prontos dir=%s — task %s", direction, task.id if task else "None")
-            return task
+    @property
+    def pending_origin(self) -> Optional[str]:
+        """Station id of a callbutton press awaiting its destination, or None."""
+        return self._pending_origin
 
-        return None
+    def _clear_pending_origin(self, emit: bool = True) -> None:
+        """Reset the pending origin station to idle (best-effort emit)."""
+        sid = self._pending_origin
+        self._pending_origin = None
+        self._pending_origin_ts = 0.0
+        if sid:
+            st = self.stations.get(sid)
+            if st and st.cb_state == CB_READY:
+                st.cb_state = CB_IDLE
+                st.cb_dir = None
+                if emit:
+                    asyncio.ensure_future(self._emit(callbutton_msg(st)))
 
     def reset_pair(self, station_id: str) -> bool:
-        """Reseta o par inteiro para idle e cancela task pendente."""
-        pair = self._find_pair(station_id)
-        if not pair:
-            return False
-        self._reset_pair_stations(pair["supplier"], pair["consumer"])
-        # Cancela task ativa do par
+        """Clear any pending origin and cancel an active transport touching this
+        station. (No more supplier/consumer pairs — kept for the /reset route.)"""
+        self._clear_pending_origin()
+        cancelled = False
         for task in list(self._tasks.values()):
-            if task.state not in (T_DONE, T_CANCELLED, T_FAILED):
-                if (task.pickup == pair["supplier"] and task.dropoff == pair["consumer"]) or \
-                   (task.pickup == pair["consumer"] and task.dropoff == pair["supplier"]):
-                    self.cancel_task(task.id)
-        log.info("reset_pair: %s resetado", station_id)
+            if task.state in (T_DONE, T_CANCELLED, T_FAILED):
+                continue
+            if station_id in (task.pickup, task.dropoff):
+                self.cancel_task(task.id)
+                st = self.stations.get(station_id)
+                if st:
+                    st.cb_state = CB_IDLE
+                    st.cb_dir = None
+                    asyncio.ensure_future(self._emit(callbutton_msg(st)))
+                cancelled = True
+        log.info("reset_pair: %s resetado (cancelled=%s)", station_id, cancelled)
         return True
 
-    def _find_pair(self, station_id: str) -> dict | None:
-        """Retorna o par (supplier, consumer) ao qual esta estação pertence."""
-        for p in config.PAIRS:
-            if station_id in (p["supplier"], p["consumer"]):
-                return p
-        return None
-
     def callbutton_pressed(self, station_id: str) -> Task | None:
-        """Mantido para compatibilidade — usa o novo handshake."""
+        """Simulate/forward a callbutton press (used by POST /callbutton/<id>)."""
         return self.button_pressed(station_id)
 
     def cancel_task(self, task_id: str) -> bool:
@@ -233,16 +275,20 @@ class Dispatcher:
 
     def jog(self, robot_id: str, vx: float, vy: float, w: float,
             duration: Optional[float] = None) -> tuple[int, dict]:
-        """Manual operator jog. Returns (http_status, payload).
+        """Manual operator jog (continuous/WASD). Returns (http_status, payload).
 
         SAFETY gates (fail closed):
           • unknown robot                → 404
           • robot has an active task     → 409 (operator must cancel first)
           • robot unhealthy/offline      → 409 (reuse recovery healthy() check)
-        vx/vy/w are clamped to the JOG_MAX_* envelope before being sent. With a
-        duration the robot auto-stops after that many seconds; without one the
-        command is single-shot (operator must send zeros or call stop). Allowed
-        even while STOP-ALL is engaged so an operator can recover the fleet.
+        vx/vy/w are clamped to the JOG_MAX_* envelope. The SEER robot has a
+        velocity watchdog, so a single command barely moves it — instead this
+        registers a CONTINUOUS target that a background thread resends every
+        JOG_RESEND_INTERVAL_S. The target auto-expires (and the robot stops)
+        JOG_KEEPALIVE_S after the last refresh, or after `duration` seconds if
+        given. The frontend re-POSTs while a WASD key is held. Zero velocity
+        clears the target (immediate stop). Allowed even while STOP-ALL is
+        engaged so an operator can recover the fleet.
         """
         robot = self.provider.robots.get(robot_id)
         if robot is None:
@@ -259,16 +305,28 @@ class Dispatcher:
         cw  = _clamp(w,  -config.JOG_MAX_W,  config.JOG_MAX_W)
         dur = _clamp(duration, 0.0, config.JOG_MAX_DURATION_S) if duration is not None else None
 
+        moving = bool(cvx or cvy or cw)
+        if not moving:
+            # Zero velocity == stop: clear the streaming target and halt now.
+            self._jog_stop(robot_id)
+            return 200, {
+                "ok": True, "robot_id": robot_id,
+                "vx": 0.0, "vy": 0.0, "w": 0.0, "duration": dur,
+                "clamped": (cvx != vx or cvy != vy or cw != w),
+                "halted": self._halted,
+            }
+
+        window = dur if (dur and dur > 0) else config.JOG_KEEPALIVE_S
+        expiry = time.monotonic() + window
+        with self._jog_lock:
+            self._jog_targets[robot_id] = (cvx, cvy, cw, expiry)
+        self._ensure_jog_thread()
+
+        # Fire one immediately so motion starts without waiting for the resend tick.
         ok = False
         send = getattr(self.provider, "send_velocity", None)
         if callable(send):
             ok = bool(send(robot_id, cvx, cvy, cw))
-
-        # Auto-stop after the requested window (only if actually moving).
-        if dur and (cvx or cvy or cw):
-            timer = threading.Timer(dur, self._jog_stop, args=(robot_id,))
-            timer.daemon = True
-            timer.start()
 
         return 200, {
             "ok": ok, "robot_id": robot_id,
@@ -277,11 +335,86 @@ class Dispatcher:
             "halted": self._halted,
         }
 
+    def jog_stop(self, robot_id: str) -> tuple[int, dict]:
+        """Stop a continuous jog immediately (POST /jog/stop)."""
+        if robot_id not in self.provider.robots:
+            return 404, {"error": f"unknown robot '{robot_id}'"}
+        self._jog_stop(robot_id)
+        return 200, {"ok": True, "robot_id": robot_id}
+
+    def _ensure_jog_thread(self) -> None:
+        """Lazily start the background velocity-resend loop (idempotent)."""
+        if self._jog_thread is not None and self._jog_thread.is_alive():
+            return
+        self._jog_thread_stop.clear()
+        self._jog_thread = threading.Thread(
+            target=self._jog_resend_loop, daemon=True, name="jog-resend")
+        self._jog_thread.start()
+
+    def _jog_resend_loop(self) -> None:
+        """Resend active jog targets to the robot continuously (SEER watchdog),
+        and auto-stop any target that has expired. Exits when no targets remain."""
+        while not self._jog_thread_stop.is_set():
+            now = time.monotonic()
+            expired: list[str] = []
+            active: list[tuple[str, float, float, float]] = []
+            with self._jog_lock:
+                if not self._jog_targets:
+                    return  # nothing to do — let the thread die; restarted on next jog
+                for rid, (vx, vy, w, exp) in list(self._jog_targets.items()):
+                    if now >= exp:
+                        expired.append(rid)
+                    else:
+                        active.append((rid, vx, vy, w))
+                for rid in expired:
+                    self._jog_targets.pop(rid, None)
+            for rid in expired:
+                self._jog_stop(rid)
+            send = getattr(self.provider, "send_velocity", None)
+            if callable(send):
+                for rid, vx, vy, w in active:
+                    try:
+                        send(rid, vx, vy, w)
+                    except Exception as exc:  # noqa: BLE001 — keep streaming others
+                        log.warning("jog resend failed for %s: %s", rid, exc)
+            time.sleep(config.JOG_RESEND_INTERVAL_S)
+
     def _jog_stop(self, robot_id: str) -> None:
+        with self._jog_lock:
+            self._jog_targets.pop(robot_id, None)
         try:
             self.provider.stop(robot_id)
-        except Exception as exc:  # noqa: BLE001 — a failed auto-stop must not crash the timer thread
-            log.warning("jog auto-stop failed for %s: %s", robot_id, exc)
+        except Exception as exc:  # noqa: BLE001 — a failed auto-stop must not crash the thread
+            log.warning("jog stop failed for %s: %s", robot_id, exc)
+
+    def jack(self, robot_id: str, action: str) -> tuple[int, dict]:
+        """Raise/lower the jack by PULSING a Digital Output (set true → wait
+        JACK_PULSE_S → set false), matching controle_completo_robo.py. The pulse
+        runs in a background thread so the HTTP call returns immediately. Returns
+        (http_status, payload). No-op (still 200) when the provider has no set_do
+        (sim mode)."""
+        if action not in ("up", "down"):
+            return 400, {"error": "action must be 'up' or 'down'"}
+        if robot_id not in self.provider.robots:
+            return 404, {"error": f"unknown robot '{robot_id}'"}
+        do_id = config.JACK_UP_DO_ID if action == "up" else config.JACK_DOWN_DO_ID
+        set_do = getattr(self.provider, "set_do", None)
+        if not callable(set_do):
+            return 200, {"ok": True, "robot_id": robot_id, "action": action,
+                         "note": "no set_do on provider (sim)"}
+
+        def _pulse() -> None:
+            try:
+                set_do(robot_id, do_id, True)
+                time.sleep(config.JACK_PULSE_S)
+                set_do(robot_id, do_id, False)
+                log.info("jack %s pulse complete (robot=%s do=%d)", action, robot_id, do_id)
+            except Exception as exc:  # noqa: BLE001 — pulse runs detached
+                log.warning("jack %s failed for %s: %s", action, robot_id, exc)
+
+        threading.Thread(target=_pulse, daemon=True, name=f"jack-{robot_id}").start()
+        return 200, {"ok": True, "robot_id": robot_id, "action": action,
+                     "do_id": do_id, "pulse_s": config.JACK_PULSE_S}
 
     def stop_all(self) -> list[Task]:
         """Emergency SOFTWARE stop. NOT a substitute for a hardware E-stop.

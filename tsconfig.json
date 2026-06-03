@@ -16,8 +16,8 @@
     "noUnusedParameters": false,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./frontend/*"]
+      "@/*": ["./desktop/*"]
     }
   },
-  "include": ["frontend", "electron", "web"]
+  "include": ["desktop", "electron", "web"]
 }

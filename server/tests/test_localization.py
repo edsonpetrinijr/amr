@@ -5,7 +5,7 @@ LOST/MISLOCALIZED → blocked → nav_failed timeouts, relocalize success/failur
 and that the existing force_* recovery hooks still behave. Deterministic — no
 real clock dependency beyond monotonic timeouts we shrink via config.
 
-Also runnable standalone: `python -m backend.tests.test_localization`.
+Also runnable standalone: `python -m server.tests.test_localization`.
 """
 from __future__ import annotations
 
@@ -20,8 +20,8 @@ except ModuleNotFoundError:  # offline sandbox — minimal shim
             return fn
     pytest = _PytestShim()  # type: ignore
 
-from backend.app import config
-from backend.app.provider import SimProvider, LocMode
+from server.app import config
+from server.app.provider import SimProvider, LocMode
 
 
 # ── Fixtures / helpers ────────────────────────────────────────────────────────

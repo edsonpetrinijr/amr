@@ -1,7 +1,7 @@
 """Preflight readiness validation tests.
 
 Pure unit tests over `preflight.validate` — no async, no I/O. Also runnable as a
-plain module in the offline sandbox (`python -m backend.tests.test_preflight`).
+plain module in the offline sandbox (`python -m server.tests.test_preflight`).
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ except ModuleNotFoundError:  # offline sandbox — minimal shim
             return fn
     pytest = _PytestShim()  # type: ignore
 
-from backend.app import config, preflight
+from server.app import config, preflight
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

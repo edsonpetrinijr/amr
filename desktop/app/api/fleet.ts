@@ -3,7 +3,8 @@
 
 import type { FleetMsg, Task } from './types'
 import type {
-  JogResult, StopAllResult, ResumeResult,
+  JogResult, JogStopResult, JackResult, CallbuttonPressResult,
+  StopAllResult, ResumeResult,
   StatsSummary, RobotTelemetry, TasksHistory, LaserScan,
   RelocalizeSuggestionsResponse,
   RobotMutationResult, ProbeResult, OpcuaTestResult, StationMutationResult,
@@ -26,16 +27,27 @@ export function fleetBaseUrl(): string {
 // ── SSE ───────────────────────────────────────────────────────────────────────
 
 type Listener = (msg: FleetMsg) => void
+type StatusListener = (connected: boolean) => void
 
 let _es: EventSource | null = null
 const _listeners = new Set<Listener>()
+const _statusListeners = new Set<StatusListener>()
 let _reconnectTimer: ReturnType<typeof setTimeout> | null = null
+
+function _emitStatus(connected: boolean) {
+  _statusListeners.forEach(fn => fn(connected))
+}
 
 function _connect() {
   if (_es) { _es.close() }
 
+  // EventSource never throws synchronously, so an unreachable backend (e.g. on an
+  // isolated plant LAN with no server) can NOT block boot — it just fails async and
+  // we retry. The app shell stays fully functional, flagged as disconnected.
   const es = new EventSource(`${BASE}/events`)
   _es = es
+
+  es.onopen = () => _emitStatus(true)
 
   es.onmessage = (e) => {
     try {
@@ -47,6 +59,7 @@ function _connect() {
   es.onerror = () => {
     es.close()
     _es = null
+    _emitStatus(false)
     if (_reconnectTimer) clearTimeout(_reconnectTimer)
     _reconnectTimer = setTimeout(_connect, 3000)
   }
@@ -65,6 +78,13 @@ export function stopFleetSSE() {
 export function onFleetMsg(fn: Listener): () => void {
   _listeners.add(fn)
   return () => _listeners.delete(fn)
+}
+
+/** Subscribe to SSE connection state (true once `/events` opens, false on error).
+ *  Lets the UI show a real offline/disconnected indicator instead of guessing. */
+export function onFleetStatus(fn: StatusListener): () => void {
+  _statusListeners.add(fn)
+  return () => _statusListeners.delete(fn)
 }
 
 // ── REST helpers ──────────────────────────────────────────────────────────────
@@ -175,6 +195,11 @@ export const fleetApi = {
   callbuttonPress: (stationId: string)           =>
     _json(`/callbutton/${stationId}`, { method: 'POST' }),
 
+  /** POST /callbutton/<id> — simulate a physical callbutton press from the UI so
+   *  an operator can test the transport flow. Surfaces 4xx via FleetApiError. */
+  pressCallbutton: (stationId: string) =>
+    _jsonOrError(`/callbutton/${stationId}`, { method: 'POST' }) as Promise<CallbuttonPressResult>,
+
   relocalize: (robot_id: string, x: number, y: number, theta: number) =>
     _json('/relocalize', { method: 'POST', body: JSON.stringify({ robot_id, x, y, theta }) }),
 
@@ -200,6 +225,22 @@ export const fleetApi = {
       method: 'POST',
       body: JSON.stringify({ robot_id, ...body }),
     }) as Promise<JogResult>,
+
+  /** POST /jog/stop — immediately zero a robot's velocity (cancels the held jog).
+   *  Throws FleetApiError on backend errors so callers can surface the message. */
+  jogStop: (robot_id: string) =>
+    _jsonOrError('/jog/stop', {
+      method: 'POST',
+      body: JSON.stringify({ robot_id }),
+    }) as Promise<JogStopResult>,
+
+  /** POST /jack — run a full raise/lower DO pulse (takes a few seconds server-side).
+   *  Throws FleetApiError on backend errors so callers can surface the message. */
+  jack: (robot_id: string, action: 'up' | 'down') =>
+    _jsonOrError('/jack', {
+      method: 'POST',
+      body: JSON.stringify({ robot_id, action }),
+    }) as Promise<JackResult>,
 
   /** Software STOP-ALL — halts every robot and cancels active tasks. */
   stopAll: () =>

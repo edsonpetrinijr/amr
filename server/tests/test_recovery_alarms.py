@@ -25,10 +25,10 @@ except ModuleNotFoundError:  # offline sandbox — minimal shim
             return fn
     pytest = _PytestShim()
 
-from backend.app import config
-from backend.app.dispatcher import Dispatcher
-from backend.app.models import T_ENROUTE_PICKUP, T_AT_PICKUP, T_ENROUTE_DROP
-from backend.app.provider import LocMode, SimProvider
+from server.app import config
+from server.app.dispatcher import Dispatcher
+from server.app.models import T_ENROUTE_PICKUP, T_AT_PICKUP, T_ENROUTE_DROP
+from server.app.provider import LocMode, SimProvider
 
 
 IN_FLIGHT = (T_ENROUTE_PICKUP, T_AT_PICKUP, T_ENROUTE_DROP)
@@ -97,7 +97,7 @@ REQUIRED_KEYS = {
 
 def test_loc_loss_emits_single_structured_alarm(loop, fast_recovery):
     disp, provider, events = make_dispatcher()
-    task = disp.create_task("AP1", "CB1")
+    task = disp.create_task("CB-ALMOX", "CB1")
     step(disp, provider, loop)                 # assign + start navigating
     assert task.state in IN_FLIGHT
     rid = task.robot
@@ -123,7 +123,7 @@ def test_loc_loss_emits_single_structured_alarm(loop, fast_recovery):
 
 def test_staying_in_incident_does_not_reemit(loop, fast_recovery):
     disp, provider, events = make_dispatcher()
-    task = disp.create_task("AP1", "CB1")
+    task = disp.create_task("CB-ALMOX", "CB1")
     step(disp, provider, loop)
     rid = task.robot
     robot = provider.robots[rid]
@@ -146,7 +146,7 @@ def test_staying_in_incident_does_not_reemit(loop, fast_recovery):
 
 def test_relocalize_recovery_then_new_loss_new_incident(loop, fast_recovery):
     disp, provider, events = make_dispatcher()
-    task = disp.create_task("AP1", "CB1")
+    task = disp.create_task("CB-ALMOX", "CB1")
     step(disp, provider, loop)
     rid = task.robot
     robot = provider.robots[rid]

@@ -68,22 +68,15 @@ STATIONS = [
     {"id": "CB4",   "type": "callbutton", "label": "Linha B · Posto 2","x": 78, "y": 20, "seer_lm": None, "ap_id": None,  "opcua_node": "ns=2;s=CallButton.CB4"},
     {"id": "CB5",   "type": "callbutton", "label": "Linha C · Posto 1","x": 86, "y": 48, "seer_lm": None, "ap_id": None,  "opcua_node": "ns=2;s=CallButton.CB5"},
     {"id": "CB6",   "type": "callbutton", "label": "Linha C · Posto 2","x": 70, "y": 62, "seer_lm": None, "ap_id": None,  "opcua_node": "ns=2;s=CallButton.CB6"},
-    # AP1 is the pilot pair's supplier (Almox). LM1/LM2 are now plain SEER
-    # landmarks (LocationMark) — NOT action points — so AP1 navigates to
-    # landmark LM1 and carries no ap_id. (Was "LM20" + ap_id "AP1", both stale:
-    # the live map only has LM1 + LM2 and neither is an action point anymore.)
-    {"id": "AP1",   "type": "ap",         "label": "Almox · Doca 1",  "x": 18, "y": 58, "seer_lm": "LM1",  "ap_id": None,  "opcua_node": "ns=1;s=boolBTN011", "opcua_ret": "ns=1;s=boolBTN021"},
+    # CB-ALMOX (ex-AP1): Action Points foram REMOVIDOS — agora é um callbutton
+    # comum ligado ao landmark LM1. O modelo novo: o operador aperta o botão da
+    # ORIGEM e depois o do DESTINO; o robô faz o transporte LM_origem → LM_destino.
+    {"id": "CB-ALMOX", "type": "callbutton", "label": "Almox · Doca 1", "x": 18, "y": 58, "seer_lm": "LM1", "ap_id": None, "opcua_node": "ns=1;s=boolBTN011", "opcua_ret": "ns=1;s=boolBTN021"},
 ]
 
-# Pairs: supplier (quem faz a peça) → consumer (quem precisa da peça)
-# Ambos precisam apertar o botão para o AMR ser despachado.
-PAIRS = [
-    {
-        "supplier": "AP1", "consumer": "CB1",
-        "fwd_label": "Almox → Linha",   # LM1 → LM2
-        "ret_label": "Linha → Almox",   # LM2 → LM1
-    }
-]
+# Action Points removidos: o despacho não usa mais pares supplier/consumer. Um
+# transporte é formado por DOIS apertos de callbutton (origem e destino).
+PAIRS: list[dict] = []
 
 # ── Robots ──────────────────────────────────────────────────────────────────
 # Real deployment: 9 operational AMRs (1 of 10 is educational). Each gets an IP
@@ -136,6 +129,31 @@ JOG_MAX_W  = float(os.getenv("JOG_MAX_W",  "0.40"))   # rad/s — yaw
 # the command is single-shot and the operator must send zeros / call stop.
 JOG_DEFAULT_DURATION_S = float(os.getenv("JOG_DEFAULT_DURATION_S", "0.5"))
 JOG_MAX_DURATION_S     = float(os.getenv("JOG_MAX_DURATION_S", "3.0"))
+
+# ── Continuous jog / WASD streaming ─────────────────────────────────────────
+# The SEER robot has a velocity watchdog: a single motion command makes it move
+# only for an instant, then it stops. To hold motion the backend must RE-SEND
+# the velocity continuously. The frontend (WASD hold-to-move) re-POSTs /jog at
+# ~150 ms; the backend resends the last commanded velocity to the robot every
+# JOG_RESEND_INTERVAL_S, and auto-stops if no /jog refresh arrives within
+# JOG_KEEPALIVE_S (so a dropped client or released key never leaves a runaway).
+JOG_RESEND_INTERVAL_S = float(os.getenv("JOG_RESEND_INTERVAL_S", "0.1"))   # 10 Hz resend
+JOG_KEEPALIVE_S       = float(os.getenv("JOG_KEEPALIVE_S", "0.4"))         # idle watchdog
+
+# ── Jack / load platform (Digital Output pulse) ─────────────────────────────
+# The jack is raised/lowered by PULSING a SEER Digital Output (req 6001, port
+# 19210): set DO true → wait JACK_PULSE_S → set DO false. (Matches the
+# controle_completo_robo.py controlar_jack() reference.) DO IDs are robot-
+# specific — confirm on the unit.
+JACK_UP_DO_ID   = int(os.getenv("JACK_UP_DO_ID", "1"))
+JACK_DOWN_DO_ID = int(os.getenv("JACK_DOWN_DO_ID", "2"))
+JACK_PULSE_S    = float(os.getenv("JACK_PULSE_S", "3.0"))
+
+# ── Callbutton transport (2-press model) ────────────────────────────────────
+# First press = origin (pickup LM), second press on a different callbutton =
+# destination (dropoff LM) → a transport task is created. A lone origin press is
+# discarded after this many seconds so a stale origin never lingers.
+CALLBUTTON_ORIGIN_TIMEOUT_S = float(os.getenv("CALLBUTTON_ORIGIN_TIMEOUT_S", "30.0"))
 
 # Read-only telemetry/analytics query caps — never scan unbounded rows on the
 # request thread.

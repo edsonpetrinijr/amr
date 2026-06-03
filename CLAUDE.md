@@ -17,17 +17,17 @@ npm install         # install deps
 npm run dev         # Electron + Vite dev (vite)
 npm run web         # browser-only dev (vite --config vite.web.config.ts)
 npm run build       # tsc + vite build + electron-builder
-npm run lint        # ESLint (eslint src --ext ts,tsx)
+npm run lint        # ESLint (eslint .)
 ```
 
-The Python backend runs separately (see `backend/` and `run-backend.bat`) and listens on port `8765`.
+The Python backend runs separately (see `server/` and `run-backend.bat`) and listens on port `8765`.
 
 ## Architecture
 
-**Frontend entry:** `frontend/app/App.tsx` → `frontend/app/routes.tsx` (React Router v7
+**Frontend entry:** `desktop/app/App.tsx` → `desktop/app/routes.tsx` (React Router v7
 `createBrowserRouter`).
 
-**Routes** (all wrapped by `frontend/app/components/Layout.tsx`):
+**Routes** (all wrapped by `desktop/app/components/Layout.tsx`):
 - `/` → `Dashboard` — fleet overview
 - `/field` → `Field` — live map / robot positions
 - `/devices` → `Devices` — robot & device inventory
@@ -36,18 +36,18 @@ The Python backend runs separately (see `backend/` and `run-backend.bat`) and li
 - `/callbuttons` → `Callbuttons` — OPC UA callbutton bindings
 - `/settings` → `SettingsPage`
 
-**Backend:** `backend/app/` — Flask app exposing REST + SSE (`/events`). Dispatches to SEER Robokit
+**Backend:** `server/app/` — Flask app exposing REST + SSE (`/events`). Dispatches to SEER Robokit
 over TCP with a Sim provider for offline dev; OPC UA driver for callbuttons; SQLite (`fleet.db`)
 telemetry. (Do not edit the backend from frontend tasks unless asked.)
 
 **Electron:** `electron/main.ts` (main process) + `electron/preload.ts`.
 
-**UI Components:** `frontend/app/components/ui/` — shadcn/ui components. Reuse existing ones before
+**UI Components:** `desktop/app/components/ui/` — shadcn/ui components. Reuse existing ones before
 adding new.
 
 **Styling:** Tailwind CSS v4, dark GitHub-inspired theme (`#0d1117` bg, `#58a6ff` accent). Colors
-defined in `frontend/styles/theme.css` as OKLCH CSS vars. Utility helper `cn()` (clsx +
-tailwind-merge) in `frontend/app/utils.ts`.
+defined in `desktop/styles/theme.css` as OKLCH CSS vars. Utility helper `cn()` (clsx +
+tailwind-merge) in `desktop/app/utils.ts`.
 
 ## Maps & Tasks
 

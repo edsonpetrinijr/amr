@@ -1,4 +1,4 @@
-// Fleet domain types — mirror of backend/app/models.py
+// Fleet domain types — mirror of server/app/models.py
 
 export interface Pos2D { x: number; y: number }
 export interface Pose2D { x: number; y: number; theta: number }
@@ -189,6 +189,28 @@ export interface JogResult {
   duration: number | null
   clamped: boolean
   halted: boolean
+}
+
+/** POST /jog/stop → {ok, robot_id} (immediately zeroes velocity). */
+export interface JogStopResult {
+  ok: boolean
+  robot_id: string
+}
+
+/** POST /jack → {ok, robot_id, action} (full raise/lower DO pulse). */
+export interface JackResult {
+  ok: boolean
+  robot_id: string
+  action: 'up' | 'down'
+}
+
+/** POST /callbutton/<id> → simulate a physical press. The backend may include
+ *  the resulting transport/callbutton state; all fields beyond `ok` are optional. */
+export interface CallbuttonPressResult {
+  ok: boolean
+  station_id?: string
+  state?: string
+  message?: string
 }
 
 /** POST /stop_all → {halted:true, cancelled:[...], note} */

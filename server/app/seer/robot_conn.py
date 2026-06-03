@@ -24,6 +24,7 @@ from .protocol import (
     pack_msg, unpack_head,
     robot_control_motion_req, robot_control_reloc_req,
     robot_other_setdo_req,
+    robot_status_battery_req,
     robot_status_info_req, robot_status_laser_req, robot_status_loc_req,
     robot_status_speed_req, robot_status_task_req,
     robot_task_gotarget_req,
@@ -100,7 +101,7 @@ def _recv_reply(sock: socket.socket) -> Optional[dict]:
 
 
 def battery_pct_from_info(info: dict) -> Optional[float]:
-    """Extract battery percent (0–100) from a SEER status reply (request 1000).
+    """Extract battery percent (0–100) from a SEER status reply (request 1007).
 
     SEER Robokit reports a FLAT `battery_level` float in 0.0–1.0 (not nested,
     not a percentage), so we multiply by 100. Falls back to the legacy nested
@@ -246,7 +247,10 @@ class RobotConn:
             task = _recv_reply(sock)
             if task is None:
                 return False
-            # ── Battery (best-effort) ─────────────────────────────────────────
+            # ── Battery (authoritative source: request 1007) ──────────────────
+            sock.sendall(pack_msg(self._next_seq(), robot_status_battery_req, {}))
+            batt = _recv_reply(sock)  # None is tolerated here
+            # ── Robot info (model only; 1000 does NOT carry battery_level) ─────
             sock.sendall(pack_msg(self._next_seq(), robot_status_info_req, {}))
             info = _recv_reply(sock)  # None is tolerated here
 
@@ -273,16 +277,18 @@ class RobotConn:
             if task:
                 updates.update(task_status=task.get('task_status', self.state.task_status),
                                 target_id=task.get('target_id', self.state.target_id) or '')
-            if info:
-                # SEER reports a FLAT `battery_level` (0.0–1.0). Keep the
-                # previous percent when genuinely absent; a present 0.0 sticks.
-                pct = battery_pct_from_info(info)
+            if batt:
+                # SEER request 1007 reports a FLAT `battery_level` (0.0–1.0).
+                # Keep the previous percent when genuinely absent; a present
+                # 0.0 sticks. This is the authoritative battery source.
+                pct = battery_pct_from_info(batt)
                 if pct is not None:
                     updates['battery'] = pct
-                # Opportunistic charging flag (kept if firmware omits it).
-                chg = info.get('charging')
+                # Charging flag from the 1007 reply (kept if firmware omits it).
+                chg = batt.get('charging')
                 if chg is not None:
                     updates['charging'] = bool(chg)
+            if info:
                 # Robot model/name (best-effort: field name varies by firmware).
                 # Try the common SEER keys without crashing on absence.
                 model = (info.get('model')
@@ -294,10 +300,19 @@ class RobotConn:
 
             self.state.update(**updates)
 
-            # ── Laser scan (gated to ~2 Hz; separate socket via _cmd) ─────────
+            # ── Laser scan (gated to ~2 Hz; INLINE on the persistent socket) ──
+            # Fetched on the SAME poll socket (request→reply paired) instead of
+            # opening a second concurrent 19204 connection via get_laser(), which
+            # could fail/return nothing on real hardware. The PDF (p.24) confirms
+            # `laser_beams` is [[x, y], …] in the WORLD/MAP frame, so the frontend
+            # renders them with NO pose composition.
             now = time.time()
             if now - self._last_laser >= LASER_INTERVAL:
-                beams = self.get_laser()
+                sock.sendall(pack_msg(self._next_seq(), robot_status_laser_req, {'step': 4}))
+                laser = _recv_reply(sock)  # None tolerated
+                if laser is None:
+                    return False
+                beams = laser.get('laser_beams', [])
                 self.state.update(laser_beams=beams, laser_ts=now)
                 self._last_laser = now
 
@@ -310,13 +325,14 @@ class RobotConn:
     # ── Command API ───────────────────────────────────────────────────────────
 
     def get_laser(self, step: int = 4) -> list:
-        """Pull one laser scan (request 1009). `step` is the decimation stride
-        (3–5; lower = more points). Returns the `laser_beams` array or [] on
-        failure. NOTE(real HW): the protocol PDF (p.24) states beams are already
-        in the WORLD/MAP frame as [x, y] metres — the frontend renders them with
-        NO pose composition. If a real unit ever returns robot-relative or
-        angle/distance instead, this assumption (and the frontend render) breaks.
-        Confirm field shape on the first real-robot test."""
+        """Pull one laser scan (request 1009) over a FRESH connection. `step` is
+        the decimation stride (3–5; lower = more points). Returns the
+        `laser_beams` array or [] on failure. The protocol PDF (p.24) confirms
+        beams are already in the WORLD/MAP frame as [x, y] metres, so the
+        frontend renders them with NO pose composition — that assumption is
+        correct. NOTE: the poll thread fetches laser INLINE on its persistent
+        socket; this standalone method exists for the GET /robots/<id>/laser
+        endpoint and deliberately opens its own connection."""
         reply = _cmd(self.ip, API_PORT_STATE, self._next_seq(),
                      robot_status_laser_req, {'step': step})
         if not reply:

@@ -5,7 +5,7 @@ Deterministic checks that SimProvider.laser():
   - respects the LASER_MAX_RANGE_M clamp,
   - is non-empty when a wall is within range.
 
-Also runnable standalone: `python -m backend.tests.test_laser`.
+Also runnable standalone: `python -m server.tests.test_laser`.
 """
 from __future__ import annotations
 
@@ -20,8 +20,8 @@ except ModuleNotFoundError:  # offline sandbox — minimal shim
             return fn
     pytest = _PytestShim()  # type: ignore
 
-from backend.app import provider as provider_mod
-from backend.app.provider import SimProvider
+from server.app import provider as provider_mod
+from server.app.provider import SimProvider
 
 
 def _make(rid_est=(0.0, 0.0), walls=None):

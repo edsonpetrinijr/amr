@@ -10,7 +10,7 @@ echo.
 
 :: Backend (Flask) numa janela separada
 echo [1/2] Iniciando backend (porta 8765)...
-start "Fleet Backend" cmd /k "cd /d "%~dp0" && python -m backend.app.main"
+start "Fleet Backend" cmd /k "cd /d "%~dp0" && python -m server.app.main"
 
 :: Aguarda o backend subir
 timeout /t 3 /nobreak > nul

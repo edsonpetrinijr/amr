@@ -20,7 +20,7 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './frontend'),
+      '@': path.resolve(__dirname, './desktop'),
     },
   },
 })

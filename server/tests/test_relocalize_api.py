@@ -6,7 +6,7 @@ path, and the negative cases: no map, unknown robot, missing params).
 
 Drives the real Flask app via its test client in SIM_MODE, mirroring the
 harness in test_operator_endpoints.py. Offline-friendly: runnable with plain
-`python -m backend.tests.test_relocalize_api` or under pytest.
+`python -m server.tests.test_relocalize_api` or under pytest.
 """
 from __future__ import annotations
 
@@ -22,11 +22,11 @@ except ModuleNotFoundError:  # offline sandbox — minimal shim
             return fn
     pytest = _PytestShim()
 
-from backend.app import config, db
-from backend.app import main as appmod
-from backend.app.dispatcher import Dispatcher
-from backend.app.provider import SimProvider
-from backend.app.smap import Landmark, MapModel, Pos2D
+from server.app import config, db
+from server.app import main as appmod
+from server.app.dispatcher import Dispatcher
+from server.app.provider import SimProvider
+from server.app.smap import Landmark, MapModel, Pos2D
 
 
 # ── Harness ───────────────────────────────────────────────────────────────────

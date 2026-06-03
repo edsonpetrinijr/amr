@@ -6,7 +6,7 @@ Drives the real Flask app via its test client in SIM_MODE. A throwaway temp
 sqlite DB is wired in (config.DB_PATH) and seeded with a couple of telemetry /
 task_event rows so the analytics endpoints have real data to fold.
 
-Offline-friendly: runnable with plain `python backend/tests/test_operator_endpoints.py`
+Offline-friendly: runnable with plain `python server/tests/test_operator_endpoints.py`
 (same __main__ shim as test_recovery.py / test_opcua_driver.py) or under pytest.
 """
 from __future__ import annotations
@@ -24,11 +24,11 @@ except ModuleNotFoundError:  # offline sandbox — minimal shim
             return fn
     pytest = _PytestShim()
 
-from backend.app import config, db
-from backend.app import main as appmod
-from backend.app.dispatcher import Dispatcher
-from backend.app.models import IDLE, ENROUTE_PICKUP, T_ENROUTE_PICKUP
-from backend.app.provider import SimProvider
+from server.app import config, db
+from server.app import main as appmod
+from server.app.dispatcher import Dispatcher
+from server.app.models import IDLE, ENROUTE_PICKUP, T_ENROUTE_PICKUP
+from server.app.provider import SimProvider
 
 
 # ── Harness ───────────────────────────────────────────────────────────────────
@@ -63,11 +63,11 @@ def _seed_rows(disp: Dispatcher) -> None:
         def __init__(self, tid, robot, pickup, dropoff):
             self.id, self.robot, self.pickup, self.dropoff = tid, robot, pickup, dropoff
     rid = robots[0].id
-    t1 = _T("T9001", rid, "AP1", "CB1")
+    t1 = _T("T9001", rid, "CB-ALMOX", "CB1")
     db.log_task_event(t1, "created")
     time.sleep(0.01)
     db.log_task_event(t1, "done")
-    t2 = _T("T9002", rid, "AP1", "CB1")
+    t2 = _T("T9002", rid, "CB-ALMOX", "CB1")
     db.log_task_event(t2, "created")
     db.log_task_event(t2, "failed")
 
@@ -125,7 +125,7 @@ def test_jog_rejected_with_active_task():
 def test_stop_all_cancels_and_halts_then_resume():
     client, disp = make_app()
     # Create + assign a task so there is something to cancel.
-    task = disp.create_task("AP1", "CB1")
+    task = disp.create_task("CB-ALMOX", "CB1")
     assert task is not None
     disp._assign_pending()
     assert task.state == T_ENROUTE_PICKUP
@@ -141,7 +141,7 @@ def test_stop_all_cancels_and_halts_then_resume():
     assert disp.provider.robots[task.robot].current_task is None
 
     # While halted, a brand-new pending task must NOT be auto-assigned.
-    t2 = disp.create_task("AP1", "CB1")
+    t2 = disp.create_task("CB-ALMOX", "CB1")
     assert t2 is not None
     disp._assign_pending()
     assert t2.robot is None

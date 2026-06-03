@@ -1,14 +1,19 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // RobotPreview3D — opt-in, display-only 3D preview of the selected AMR (Phase 2).
 //
-// PLACEHOLDER STATE (honest): the only CAD we received was `AMR.step`, which on
-// inspection is a ~0.065×0.090×0.029 m sub-component (a bracket/fastener
-// sub-assembly, ~3.7k verts), NOT the full robot chassis. Its GLB conversion
-// was therefore an orphan and has been removed. Until a proper full-assembly STEP
-// export lands we render a TO-SCALE procedural box sized from the robot's
-// footprint (length × width × height in metres) so the preview is dimensionally
-// honest. The marked note below is the only spot that changes when a real model
-// arrives.
+// This panel loads the real `/w3_600b.glb` model — the FULL multi-part SEER W3-600B
+// assembly (chassis + left/right wheels + casters + back/front lidars + up/down
+// cameras + tray), with each part's URDF colour baked in as a glTF material so the
+// per-part colours render straight from the asset. All transforms are baked in at
+// conversion time (units in metres, forward = +X, up = +Y, footprint centred over
+// the origin, resting on the floor at y = 0), so it renders with NO runtime scale or
+// rotation. The GLB is Draco-compressed and decoded with a LOCAL `/draco/` decoder
+// set (vendored under public/draco) so it works fully offline inside Electron. If the
+// model fails to load it degrades gracefully to a to-scale procedural placeholder box
+// sized from the robot's footprint.
+//
+// Model provenance & licensing: see public/MODEL_NOTICE.md
+// (source GilmarCorreia/sim_models, GPL-3.0 — internal dev/test use only).
 //
 // Isolation guarantees (CTO guardrails):
 //   • Lazy-loaded by Field (three/r3f/drei live in a separate chunk — zero cost to
@@ -22,12 +27,17 @@
 //   • Teardown: declarative geometries/materials are auto-disposed by R3F when the
 //     Canvas unmounts (panel is gated behind the 3D toggle, unmounted by default).
 // ─────────────────────────────────────────────────────────────────────────────
-import React, { Suspense, useEffect, useRef } from 'react'
+import React, { Suspense, useEffect, useMemo, useRef } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
-import { OrbitControls, Grid, RoundedBox } from '@react-three/drei'
+import { OrbitControls, Grid, RoundedBox, useGLTF } from '@react-three/drei'
 import type * as THREE from 'three'
+import { MeshStandardMaterial } from 'three'
 import type { Robot } from '../api/types'
 import { DEFAULT_FOOTPRINT, DEFAULT_HEIGHT_M } from '../api/types'
+
+// Real chassis model + local Draco decoder (both vendored under public/).
+const MODEL_URL = '/w3_600b.glb'
+const DRACO_PATH = '/draco/'
 
 // Map robot status → chassis colour (mirrors the 2D map's status semantics).
 const STATUS_COLOR: Record<string, string> = {
@@ -59,6 +69,48 @@ function PlaceholderChassis(
       </mesh>
     </group>
   )
+}
+
+/** The full SEER W3-600B robot loaded from `/w3_600b.glb` (Draco, local `/draco/`
+ *  decoder): the complete multi-part assembly (chassis + wheels + casters + lidars +
+ *  cameras + tray), with per-part colours baked in as glTF materials that win at
+ *  render time. Transforms are baked into the asset (metres, forward = +X, up = +Y,
+ *  rests on the floor) so we render it with NO scale and NO rotation. The scene is
+ *  cloned so the cached glTF graph is never mutated; the baked materials are left
+ *  untouched, and ONLY a mesh that genuinely has no material gets a neutral PBR
+ *  fallback (material-less safety). */
+function RealChassis() {
+  const gltf = useGLTF(MODEL_URL, DRACO_PATH)
+  const scene = useMemo(() => {
+    const cloned = gltf.scene.clone(true)
+    cloned.traverse((obj) => {
+      const mesh = obj as THREE.Mesh
+      if (mesh.isMesh && !mesh.material) {
+        mesh.material = new MeshStandardMaterial({ color: '#9099a2', metalness: 0.1, roughness: 0.6 })
+      }
+    })
+    return cloned
+  }, [gltf.scene])
+
+  return <primitive object={scene} />
+}
+
+/** Catches a failed model load (missing/corrupt GLB, decoder error) and shows the
+ *  to-scale placeholder instead, so the panel never hard-crashes the Field view. */
+class ChassisErrorBoundary extends React.Component<
+  { fallback: React.ReactNode; children: React.ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { fallback: React.ReactNode; children: React.ReactNode }) {
+    super(props)
+    this.state = { hasError: false }
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true }
+  }
+  render() {
+    return this.state.hasError ? this.props.fallback : this.props.children
+  }
 }
 
 /** Drives heading from the live pose WITHOUT React re-renders: polls robotsRef at
@@ -107,6 +159,13 @@ function RobotPreview3D({ robotId, robotsRef, className }: RobotPreview3DProps) 
   const fp = snap?.footprint ?? DEFAULT_FOOTPRINT
   const color = STATUS_COLOR[snap?.status ?? 'idle'] ?? STATUS_COLOR.idle
 
+  // Preload the model on mount (and free its cache on unmount). Mount/unmount only —
+  // this adds no always-on RAF, so the demand frameloop isolation is preserved.
+  useEffect(() => {
+    useGLTF.preload(MODEL_URL, DRACO_PATH)
+    return () => useGLTF.clear(MODEL_URL)
+  }, [])
+
   return (
     <div className={className ?? 'w-80 flex-shrink-0'}>
       <Canvas
@@ -119,13 +178,16 @@ function RobotPreview3D({ robotId, robotsRef, className }: RobotPreview3DProps) 
         <ambientLight intensity={0.6} />
         <directionalLight position={[3, 5, 2]} intensity={1.1} />
 
-        <Suspense fallback={null}>
-          <PoseDriver robotId={robotId} robotsRef={robotsRef}>
-            {/* Real full-assembly model pending a proper STEP export from the founder
-                (the AMR.step we had converted to a sub-component, not the chassis). */}
-            <PlaceholderChassis length={fp.length} width={fp.width} height={DEFAULT_HEIGHT_M} color={color} />
-          </PoseDriver>
-        </Suspense>
+        <PoseDriver robotId={robotId} robotsRef={robotsRef}>
+          {/* Real chassis inside the pose group; placeholder is the graceful fallback. */}
+          <ChassisErrorBoundary
+            fallback={<PlaceholderChassis length={fp.length} width={fp.width} height={DEFAULT_HEIGHT_M} color={color} />}
+          >
+            <Suspense fallback={null}>
+              <RealChassis />
+            </Suspense>
+          </ChassisErrorBoundary>
+        </PoseDriver>
 
         {/* Ground grid for scale reference (1 m sections, 0.25 m cells). */}
         <Grid

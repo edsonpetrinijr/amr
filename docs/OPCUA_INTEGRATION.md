@@ -65,7 +65,7 @@ OPCUA_NODE_MAP='{
 ```
 
 **B. From the station table** — if `OPCUA_NODE_MAP` is empty we derive the map from
-`backend/app/config.py:STATIONS` (`opcua_node` → `fwd`, `opcua_ret` → `ret`).
+`server/app/config.py:STATIONS` (`opcua_node` → `fwd`, `opcua_ret` → `ret`).
 
 Station ids (`AP1`, `CB1`, …) and the supplier→consumer **pairs** live in
 `config.py`. A task is dispatched only when **both** sides of a pair press the

@@ -5,7 +5,7 @@ Drives the real Flask app via its test client in SIM_MODE with a throwaway temp
 sqlite DB AND a throwaway temp devices.json store, so robot CRUD / station OPC UA
 edits and their persistence are exercised end-to-end with no real hardware.
 
-Offline-friendly: runnable with plain `python backend/tests/test_devices_api.py`
+Offline-friendly: runnable with plain `python server/tests/test_devices_api.py`
 (same __main__ shim as test_operator_endpoints.py / test_opcua_driver.py) or
 under pytest.
 """
@@ -24,10 +24,10 @@ except ModuleNotFoundError:  # offline sandbox — minimal shim
             return fn
     pytest = _PytestShim()
 
-from backend.app import config, db, store
-from backend.app import main as appmod
-from backend.app.dispatcher import Dispatcher
-from backend.app.provider import SimProvider
+from server.app import config, db, store
+from server.app import main as appmod
+from server.app.dispatcher import Dispatcher
+from server.app.provider import SimProvider
 
 # Pristine defaults so tests don't leak fleet/station mutations into each other.
 _ORIG_ROBOTS = copy.deepcopy(config.ROBOTS)

@@ -9,7 +9,7 @@ The driver runs in its own background thread/loop (as in production); the mock
 server runs in the test's asyncio loop. They talk real OPC UA over TCP.
 
 This repo's sandbox has asyncua but NOT pytest, so the file is also runnable
-standalone:  ``python -m backend.tests.test_opcua_driver``
+standalone:  ``python -m server.tests.test_opcua_driver``
 The pytest API is unchanged and runs identically under ``python -m pytest``.
 """
 from __future__ import annotations
@@ -26,9 +26,9 @@ except ModuleNotFoundError:  # offline sandbox — minimal shim
             return lambda f: f
     pytest = _PytestShim()  # type: ignore
 
-from backend.app import config
-from backend.app.opcua import OpcUaCallbuttonDriver
-from backend.tests.opcua_mock_server import MockOpcUaServer
+from server.app import config
+from server.app.opcua import OpcUaCallbuttonDriver
+from server.tests.opcua_mock_server import MockOpcUaServer
 
 ENDPOINT = "opc.tcp://127.0.0.1:48400/fleet"
 CB1 = "ns=2;s=CallButton.CB1"
@@ -215,7 +215,7 @@ def test_reconnect_resubscribes():
 
 async def _test_probe_node_reads_seeded_value() -> None:
     """probe_node against the mock server returns ok=True with the seeded value."""
-    from backend.app.opcua import probe_node
+    from server.app.opcua import probe_node
     _apply_fast_config()
     server = MockOpcUaServer(ENDPOINT, {CB1: False})
     await server.start()
@@ -235,7 +235,7 @@ async def _test_probe_node_reads_seeded_value() -> None:
 
 def _test_probe_node_empty_endpoint() -> None:
     """probe_node with endpoint='' is configured=False, ok=False, no exception."""
-    from backend.app.opcua import probe_node
+    from server.app.opcua import probe_node
     res = probe_node(CB1, "", 1.0)
     assert res["ok"] is False, res
     assert res["configured"] is False, res
@@ -246,7 +246,7 @@ def _test_probe_node_empty_endpoint() -> None:
 
 def _test_probe_node_unreachable() -> None:
     """probe_node against a bogus port returns ok=False with an error string."""
-    from backend.app.opcua import probe_node
+    from server.app.opcua import probe_node
     bogus = "opc.tcp://127.0.0.1:1/none"
     res = probe_node(CB1, bogus, 1.0)
     assert res["ok"] is False, res

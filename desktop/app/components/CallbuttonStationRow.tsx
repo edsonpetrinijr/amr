@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Loader2, Save } from 'lucide-react'
+import { Loader2, Save, Bell } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Badge } from './ui/badge'
@@ -18,6 +19,7 @@ export function CallbuttonStationRow({ station }: { station: Station }) {
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<OpcuaTestResult | null>(null)
   const [testError, setTestError] = useState<string | null>(null)
+  const [pressing, setPressing] = useState(false)
 
   // Keep input in sync if the SSE snapshot changes the configured node.
   useEffect(() => { setNode(station.opcua_node ?? '') }, [station.opcua_node])
@@ -54,6 +56,24 @@ export function CallbuttonStationRow({ station }: { station: Station }) {
     }
   }
 
+  async function handlePress() {
+    setPressing(true)
+    try {
+      const res = await fleetApi.pressCallbutton(station.id)
+      const detail = res.message
+        ?? (res.state === 'waiting_destination' ? 'aguardando destino'
+          : res.state === 'dispatched' ? 'transporte despachado'
+          : res.state)
+      toast.success(`${station.id} apertado`, detail ? { description: detail } : undefined)
+    } catch (e) {
+      toast.error('Falha ao apertar', {
+        description: e instanceof FleetApiError ? e.message : 'Backend inacessível',
+      })
+    } finally {
+      setPressing(false)
+    }
+  }
+
   return (
     <>
       <tr className="border-b border-[#21262d] hover:bg-[#161b22]">
@@ -78,10 +98,17 @@ export function CallbuttonStationRow({ station }: { station: Station }) {
           <Badge variant={CB_V[station.cb_state] ?? 'outline'}>{station.cb_state}</Badge>
         </td>
         <td className="px-4 py-2">
-          <Button variant="outline" size="sm" onClick={handleTest} disabled={testing}>
-            {testing && <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />}
-            Test
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button variant="outline" size="sm" onClick={handleTest} disabled={testing}>
+              {testing && <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />}
+              Test
+            </Button>
+            <Button variant="outline" size="sm" onClick={handlePress} disabled={pressing}
+              title="Simular pressão física do botão de chamada">
+              {pressing ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Bell className="w-3.5 h-3.5 mr-1" />}
+              Apertar
+            </Button>
+          </div>
         </td>
       </tr>
       {(saveError || testError || testResult) && (

@@ -23,13 +23,13 @@ except ModuleNotFoundError:  # offline sandbox — provide a minimal shim
             return fn
     pytest = _PytestShim()
 
-from backend.app import config
-from backend.app.dispatcher import Dispatcher
-from backend.app.models import (
+from server.app import config
+from server.app.dispatcher import Dispatcher
+from server.app.models import (
     IDLE, OFFLINE, CHARGING,
     T_PENDING, T_ENROUTE_PICKUP, T_AT_PICKUP, T_ENROUTE_DROP, T_FAILED,
 )
-from backend.app.provider import SimProvider
+from server.app.provider import SimProvider
 
 
 # ── Fixtures / helpers ────────────────────────────────────────────────────────
@@ -89,7 +89,7 @@ IN_FLIGHT = (T_ENROUTE_PICKUP, T_AT_PICKUP, T_ENROUTE_DROP)
 
 def test_nav_fail_reassigns_to_different_robot(loop, fast_recovery):
     disp, provider, events = make_dispatcher()
-    task = disp.create_task("AP1", "CB1")
+    task = disp.create_task("CB-ALMOX", "CB1")
     step(disp, provider, loop)                 # assign
     assert task.state in IN_FLIGHT
     first = task.robot
@@ -107,7 +107,7 @@ def test_nav_fail_reassigns_to_different_robot(loop, fast_recovery):
 
 def test_disconnect_marks_offline_and_reassigns(loop, fast_recovery):
     disp, provider, events = make_dispatcher()
-    task = disp.create_task("AP1", "CB1")
+    task = disp.create_task("CB-ALMOX", "CB1")
     step(disp, provider, loop)
     first = task.robot
     robot = provider.robots[first]
@@ -125,7 +125,7 @@ def test_disconnect_marks_offline_and_reassigns(loop, fast_recovery):
 
 def test_stuck_enters_recovering_with_reason_stuck(loop, fast_recovery):
     disp, provider, events = make_dispatcher()
-    task = disp.create_task("AP1", "CB1")
+    task = disp.create_task("CB-ALMOX", "CB1")
     step(disp, provider, loop)
     first = task.robot
     robot = provider.robots[first]
@@ -142,8 +142,8 @@ def test_stuck_enters_recovering_with_reason_stuck(loop, fast_recovery):
 
 def test_max_retries_fails_task_and_releases_lock(loop, fast_recovery):
     disp, provider, events = make_dispatcher()
-    task = disp.create_task("AP1", "CB1")
-    assert "AP1" in disp._station_lock
+    task = disp.create_task("CB-ALMOX", "CB1")
+    assert "CB-ALMOX" in disp._station_lock
 
     # MAX_TASK_RETRIES=2 → fail 3 times (3 distinct robots) then T_FAILED.
     for _ in range(6):
@@ -155,13 +155,13 @@ def test_max_retries_fails_task_and_releases_lock(loop, fast_recovery):
 
     assert task.state == T_FAILED
     assert task.retries == config.MAX_TASK_RETRIES
-    assert "AP1" not in disp._station_lock        # station lock released
+    assert "CB-ALMOX" not in disp._station_lock        # station lock released
     assert alarms(events, "critical")             # critical alarm emitted
 
 
 def test_battery_critical_aborts_and_routes_to_base(loop, fast_recovery):
     disp, provider, events = make_dispatcher()
-    task = disp.create_task("AP1", "CB1")
+    task = disp.create_task("CB-ALMOX", "CB1")
     step(disp, provider, loop)
     first = task.robot
     robot = provider.robots[first]
@@ -181,7 +181,7 @@ def test_single_robot_in_cooldown_waits_pending(loop, fast_recovery):
     only = next(iter(provider.robots))
     provider.robots = {only: provider.robots[only]}
 
-    task = disp.create_task("AP1", "CB1")
+    task = disp.create_task("CB-ALMOX", "CB1")
     step(disp, provider, loop)
     assert task.robot == only
 
@@ -199,7 +199,7 @@ def test_single_robot_in_cooldown_waits_pending(loop, fast_recovery):
 
 # ── Standalone runner ─────────────────────────────────────────────────────────
 # This repo's sandbox is offline and pytest cannot be installed, so the file is
-# also runnable with plain `python backend/tests/test_recovery.py`. The pytest
+# also runnable with plain `python server/tests/test_recovery.py`. The pytest
 # API above is unchanged and runs identically under `python -m pytest` when the
 # package is available.
 if __name__ == "__main__":

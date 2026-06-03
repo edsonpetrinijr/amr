@@ -4,9 +4,9 @@ Uses Flask (already installed) + SSE for real-time push.
 No extra dependencies needed.
 
 Run:
-    python -m backend.app.main          (from robotics/ folder)
+    python -m server.app.main          (from robotics/ folder)
     -- or --
-    cd backend && python -m app.main
+    cd server && python -m app.main
 
 Server-Sent Events:  GET  /events  → EventSource stream (world @10Hz, task_update, alarm)
 REST:
@@ -695,10 +695,29 @@ def reset_pair(station_id: str):
 
 @app.route("/callbutton/<station_id>", methods=["POST"])
 def callbutton_press(station_id: str):
+    """Simulate/forward a callbutton press (2-press transport model).
+    First press on a callbutton = origin (pickup); next press on a DIFFERENT
+    callbutton = destination (dropoff) → a transport task is dispatched.
+    Response state: 'dispatched' | 'waiting_destination' | 'idle'.
+    """
     if not _dispatcher:
         return jsonify({"error": "Dispatcher not ready"}), 503
     task = _dispatcher.callbutton_pressed(station_id)
-    return jsonify({"task": task.to_dict() if task else None})
+    pending = _dispatcher.pending_origin
+    if task is not None:
+        state, message = "dispatched", f"transporte {task.pickup}→{task.dropoff} despachado"
+    elif pending == station_id:
+        state, message = "waiting_destination", "origem registrada — aperte o destino"
+    else:
+        state, message = "idle", "sem ação"
+    return jsonify({
+        "ok": True,
+        "station_id": station_id,
+        "state": state,
+        "message": message,
+        "pending_origin": pending,
+        "task": task.to_dict() if task else None,
+    })
 
 
 @app.route("/setdo", methods=["POST"])
@@ -843,6 +862,41 @@ def jog():
             f"manual control of {rid} (jog vx={payload['vx']:.2f} vy={payload['vy']:.2f} w={payload['w']:.2f})",
             rid,
         ))
+    return jsonify(payload), code
+
+
+@app.route("/jog/stop", methods=["POST", "OPTIONS"])
+def jog_stop():
+    """Stop a continuous jog immediately. Body: {robot_id}."""
+    if request.method == "OPTIONS":
+        return "", 204
+    if not _dispatcher:
+        return jsonify({"error": "Dispatcher not ready"}), 503
+    body = request.get_json(force=True, silent=True) or {}
+    rid = body.get("robot_id")
+    if not rid:
+        return jsonify({"error": "robot_id required"}), 400
+    code, payload = _dispatcher.jog_stop(rid)
+    return jsonify(payload), code
+
+
+@app.route("/jack", methods=["POST", "OPTIONS"])
+def jack():
+    """Raise/lower the jack via a DO pulse. Body: {robot_id, action: 'up'|'down'}."""
+    if request.method == "OPTIONS":
+        return "", 204
+    if not _dispatcher:
+        return jsonify({"error": "Dispatcher not ready"}), 503
+    body = request.get_json(force=True, silent=True) or {}
+    rid = body.get("robot_id")
+    action = body.get("action")
+    if not rid:
+        return jsonify({"error": "robot_id required"}), 400
+    if action not in ("up", "down"):
+        return jsonify({"error": "action must be 'up' or 'down'"}), 400
+    code, payload = _dispatcher.jack(rid, action)
+    if code == 200:
+        _broadcast(alarm_msg("info", f"jack {action} on {rid}", rid))
     return jsonify(payload), code
 
 

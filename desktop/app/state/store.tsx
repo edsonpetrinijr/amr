@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useReducer } from 'react'
-import { startFleetSSE, stopFleetSSE, onFleetMsg, fleetApi } from '../api/fleet'
+import { startFleetSSE, stopFleetSSE, onFleetMsg, onFleetStatus, fleetApi } from '../api/fleet'
 import type { Robot, Station, Task, MapModel, AlarmMsg } from '../api/types'
 
 // ── State shape ───────────────────────────────────────────────────────────────
@@ -72,7 +72,8 @@ export function FleetProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initial)
 
   useEffect(() => {
-    // Load full task history once on mount
+    // Load full task history once on mount. Failure (backend offline) is non-fatal:
+    // the shell still renders, just without history — never a blank window.
     fleetApi.getTasks().then((tasks: Task[]) => dispatch({ type: 'ALL_TASKS', tasks })).catch(() => {})
 
     // Subscribe to SSE
@@ -88,11 +89,17 @@ export function FleetProvider({ children }: { children: React.ReactNode }) {
       }
     })
 
+    // Track the real connection state so the UI shows an accurate offline/disconnected
+    // indicator instead of optimistically claiming "connected".
+    const unsubStatus = onFleetStatus((connected) => {
+      dispatch({ type: connected ? 'CONNECTED' : 'DISCONNECTED' })
+    })
+
     startFleetSSE()
-    dispatch({ type: 'CONNECTED' })
 
     return () => {
       unsub()
+      unsubStatus()
       stopFleetSSE()
     }
   }, [])
