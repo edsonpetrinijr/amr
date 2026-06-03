@@ -63,7 +63,7 @@ so building is fast and parallel instead of one-at-a-time.
 ## Daily routines (slash commands)
 Run these from chat as prompts (type `/` in the chat box). Both run as the CEO.
 - **`/morning-routine`** — start of day: catch up via `TIMELINE.md` + git log, orient, surface the backlog, and agree on ONE focus. Read-only.
-- **`/end-of-day-routine`** — end of day: review what got done, append a dated entry to `TIMELINE.md`, tidy via `repo-steward`, and tee up tomorrow.
+- **`/end-of-day-routine`** — end of day: review what got done, append a dated entry to `TIMELINE.md`, tidy via `repo-steward`, commit and **push** everything, and tee up tomorrow.
 
 Prompt files live in `.github/prompts/`.
 

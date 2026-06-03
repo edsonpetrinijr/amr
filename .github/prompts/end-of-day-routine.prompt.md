@@ -11,13 +11,15 @@ Do this, in order:
 1. **See what changed.** Run `git --no-pager log --oneline --since="6am"` and `git --no-pager status --short` to see today's commits and any uncommitted work. Read the top of `TIMELINE.md` so you don't duplicate entries. Use the founder's notes above if provided.
 2. **Summarize the day.** In a few bullets: what was actually accomplished, decisions made, and anything that got stuck or changed direction.
 3. **Update the timeline.** Append a new dated entry at the TOP of `TIMELINE.md` (newest first), following the file's `## YYYY-MM-DD — <title>` / **Done / Decided / Next / Refs** format. Keep it short and factual — this is the founder's memory of the project. Only add an entry if something meaningful happened today.
-4. **Tidy the house.** If today created clutter, duplicate docs, or stray files, delegate to `repo-steward` to organize. If there's meaningful uncommitted work that's in a good state, suggest committing it (note: don't commit secrets, `fleet.db`, `__pycache__`, or generated files).
-5. **Tee up tomorrow.** List the top 1–3 things to pick up next, so the morning routine has a clean starting point. Mirror these into the new timeline entry's **Next**.
+4. **Tidy & commit the house.** If today created clutter, duplicate docs, or stray files, delegate to `repo-steward` to organize. Commit any meaningful uncommitted work that's in a good state, with clear scoped messages (note: never commit secrets, `fleet.db`, `__pycache__`, or generated files — leave those unstaged).
+5. **Push everything.** Push the day's commits to the remote so nothing is left only on this machine: `git push`. If the branch has no upstream yet, set it with `git push -u origin <branch>`. Confirm the push succeeded (or report clearly if it failed, e.g. auth or conflicts) — don't silently skip it.
+6. **Tee up tomorrow.** List the top 1–3 things to pick up next, so the morning routine has a clean starting point. Mirror these into the new timeline entry's **Next**.
 
-Keep the whole thing short. The deliverable is an updated `TIMELINE.md` plus a clear handoff to tomorrow.
+Keep the whole thing short. The deliverable is an updated `TIMELINE.md`, everything committed and **pushed**, plus a clear handoff to tomorrow.
 
 ## Output Format
 - **Today in review**: a few bullets.
 - **Timeline updated**: confirm the entry you added (show it).
 - **Housekeeping**: what was tidied/committed, or "nothing needed".
+- **Pushed**: confirm `git push` succeeded (branch + commits pushed), or report the failure.
 - **Tomorrow's pickup**: 1–3 items.
