@@ -49,6 +49,10 @@ export type RobotStatus =
 
 export interface Robot {
   id: string; name: string; ip: string
+  /** Robot model string (e.g. "W3-600B"), pulled from the unit. */
+  model: string
+  /** Live reachability from GET /robots — true when the backend can reach the unit. */
+  connected: boolean
   x: number; y: number; theta: number
   battery: number; status: RobotStatus
   nav: string
@@ -60,8 +64,9 @@ export interface Robot {
 }
 
 /** Shared default robot footprint in metres — mirror of backend
- *  models.DEFAULT_FOOTPRINT_* . Founder-confirmed real chassis spec:
- *  L×W×H = 0.95 × 0.65 × 0.25 m (950 × 650 × 250 mm, incl. bumper strip). */
+ *  models.DEFAULT_FOOTPRINT_* . Founder-confirmed spec:
+ *  0.95 × 0.65 × 0.25 m (with bumper strip). L×W×H, length is along +theta
+ *  (forward), width is perpendicular, height is for the 3D preview only. */
 export const DEFAULT_FOOTPRINT = { length: 0.95, width: 0.65 } as const
 /** Robot height in metres — used by the 3D preview only (not the 2D map). */
 export const DEFAULT_HEIGHT_M = 0.25
@@ -73,8 +78,46 @@ export interface Station {
   id: string; type: StationType; label: string
   x: number; y: number
   seer_lm: string | null; ap_id: string | null; opcua_node: string | null
+  /** OPC UA return/ack node id (paired button), if configured. */
+  opcua_ret: string | null
   cb_state: CallbuttonState
   cb_dir: 'fwd' | 'ret' | null
+}
+
+// ── Devices configuration / diagnostics results ───────────────────────────────
+
+/** Fields pulled from a unit on add/edit/probe. */
+export interface RobotPulled {
+  name: string; model: string; battery: number
+  x: number; y: number; theta: number
+}
+
+/** POST /robots and PUT /robots/<id> response. */
+export interface RobotMutationResult {
+  robot: Robot
+  connected: boolean
+  pulled: RobotPulled
+}
+
+/** POST /robots/<id>/probe response. */
+export interface ProbeResult {
+  connected: boolean
+  pulled: RobotPulled
+}
+
+/** POST /opcua/test response. */
+export interface OpcuaTestResult {
+  ok: boolean
+  value: unknown
+  error: string | null
+  configured: boolean
+  endpoint: string | null
+  node: string
+}
+
+/** PUT /stations/<id> response. */
+export interface StationMutationResult {
+  station: Station
 }
 
 export type TaskState =

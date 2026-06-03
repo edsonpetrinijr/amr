@@ -6,6 +6,7 @@ import type {
   JogResult, StopAllResult, ResumeResult,
   StatsSummary, RobotTelemetry, TasksHistory, LaserScan,
   RelocalizeSuggestionsResponse,
+  RobotMutationResult, ProbeResult, OpcuaTestResult, StationMutationResult,
 } from './types'
 
 const BASE: string = import.meta.env?.VITE_FLEET_URL ?? 'http://localhost:8765'
@@ -110,6 +111,33 @@ export const fleetApi = {
   getMap:          ()                             => _json('/map'),
   getStations:     ()                             => _json('/stations'),
   getRobots:       ()                             => _json('/robots'),
+
+  // ── Devices config / diagnostics (surface 4xx via FleetApiError) ────────────
+
+  /** POST /robots — register a unit by IP; backend probes it and returns the
+   *  connection status + pulled fields. */
+  addRobot: (body: { ip: string; id?: string; name?: string }) =>
+    _jsonOrError('/robots', { method: 'POST', body: JSON.stringify(body) }) as Promise<RobotMutationResult>,
+
+  /** PUT /robots/<id> — change IP and/or name; re-probes and returns status. */
+  updateRobot: (id: string, body: { ip?: string; name?: string }) =>
+    _jsonOrError(`/robots/${id}`, { method: 'PUT', body: JSON.stringify(body) }) as Promise<RobotMutationResult>,
+
+  /** DELETE /robots/<id> — remove a unit. */
+  deleteRobot: (id: string) =>
+    _jsonOrError(`/robots/${id}`, { method: 'DELETE' }) as Promise<{ ok: true; id: string }>,
+
+  /** POST /robots/<id>/probe — re-check reachability and re-pull fields. */
+  probeRobot: (id: string) =>
+    _jsonOrError(`/robots/${id}/probe`, { method: 'POST' }) as Promise<ProbeResult>,
+
+  /** PUT /stations/<id> — edit OPC UA node / return node / label. */
+  updateStation: (id: string, body: { opcua_node?: string | null; opcua_ret?: string | null; label?: string }) =>
+    _jsonOrError(`/stations/${id}`, { method: 'PUT', body: JSON.stringify(body) }) as Promise<StationMutationResult>,
+
+  /** POST /opcua/test — read a node (by id or station) to verify wiring. */
+  testOpcua: (body: { node?: string; station_id?: string }) =>
+    _jsonOrError('/opcua/test', { method: 'POST', body: JSON.stringify(body) }) as Promise<OpcuaTestResult>,
 
   /** Dedicated PULL for the laser layer — frontend polls ~2–3 Hz only while the
    *  Laser toggle is ON. Beams are WORLD/MAP-frame [x,y] metres (no transform). */
