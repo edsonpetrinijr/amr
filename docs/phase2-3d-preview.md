@@ -1,17 +1,25 @@
-# Phase 2 — 3D robot preview panel (DONE)
+# Phase 2 — 3D robot preview panel
 
 Opt-in 3D preview of the selected AMR, isolated from the 10 Hz SSE hot path and
 from the 2D `MapCanvas`. **Active as of Phase 2.**
 
 ## What shipped
 
-- **Real CAD model.** `AMR.step` was converted to `public/AMR.glb` (served at
-  `/AMR.glb`) with `cascadio` (OCCT STEP→GLB). The model is authored ~1:10.5 and
-  Z-up; `RobotPreview3D` fits its bounding box to the founder-confirmed real
-  footprint **0.95 L × 0.65 W × 0.25 H m** and reorients it (Y up, length +X,
-  width +Z) sitting on the floor, so it reads at true size against the 0.25 m
-  grid. If the GLB ever fails to load, an error boundary falls back to a to-scale
-  procedural rounded box (status-coloured, with a heading cone).
+- **To-scale procedural preview (dimensionally honest).** The only CAD we
+  received was `AMR.step`. On inspection (trimesh) it is a
+  **~0.065 × 0.090 × 0.029 m sub-component** — a bracket/fastener sub-assembly of
+  ~3.7k vertices / ~4.5k faces across 10 parts — **not** the full W3-600B
+  chassis. We do **not** fake a robot from it. Instead `RobotPreview3D` renders a
+  **to-scale procedural rounded box** sized from the robot's real footprint
+  (**0.85 L × 0.65 W × 0.30 H m**, the SEER W3-600B dimensions from `types.ts`
+  `DEFAULT_FOOTPRINT`/`DEFAULT_HEIGHT_M`; status-coloured, with a forward heading
+  cone), sitting on the floor (Y up, length +X, width +Z) so it reads at true size
+  against the 0.25 m grid. A **real full-assembly model is pending a proper STEP
+  export from the founder**. The converted orphan `public/AMR.glb` (122 KB, from
+  the sub-component `AMR.step`) was a sub-part — never loaded — and has been
+  **removed from the repo** to avoid a misleading unused asset (it also derived
+  from a GPL-3.0 dimension source). Do not re-add a mesh until a license-clean,
+  full-assembly model is cleared (see TIMELINE 2026-06-03).
 - **Deps:** `three`, `@react-three/fiber@8` (React 18), `@react-three/drei@9`,
   `@types/three`.
 - **Isolation:** `RobotPreview3D` is `React.lazy`-loaded, so three.js is split
@@ -25,9 +33,12 @@ Field View → click the **3D** toggle in the top-right toolbar (next to *Laser*
 A right-hand panel shows the selected robot in 3D (or the first robot if none is
 selected). Orbit/zoom with the mouse. Toggle off to unmount it.
 
-## Regenerating the GLB (one-off, tooling not committed)
+## When the real model arrives
 
-```sh
-pip install cascadio trimesh
-python -c "import cascadio; cascadio.step_to_glb('AMR.step', 'public/AMR.glb', tol_linear=0.1, tol_angular=0.5)"
-```
+Once a full-assembly GLB exists, drop it in `public/` and replace the
+`<PlaceholderChassis/>` inside `PoseDriver` with a drei `useGLTF` loader: compute
+the loaded scene's bounding box at runtime (`THREE.Box3.setFromObject`), scale
+uniformly so the two largest horizontal dims match `fp.length × fp.width`, put it
+on the floor (Y up; reorient if the CAD is Z-up), keep `rotation.y = -theta` from
+`PoseDriver`, add `useGLTF.preload(...)`, and keep `PlaceholderChassis` as the
+Suspense/error fallback.
