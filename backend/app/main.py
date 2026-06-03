@@ -497,6 +497,77 @@ def relocalize():
     return jsonify({"ok": True, "note": "no relocalize support on provider"})
 
 
+@app.route("/api/relocalize/suggestions")
+def relocalize_suggestions():
+    """Nearest map landmarks an operator can relocalize a robot onto.
+
+    Query: robot_id (use its current/last-known est pose) OR explicit x & y.
+    Optional k (default 5, clamped to [1, 20]) and max_dist_m. Everything is in
+    METRES (smap frame) — no scaling. Response frame is "smap_meters"."""
+    if not _map_model:
+        return jsonify({"error": "MAP_NOT_LOADED"}), 409
+
+    try:
+        k = int(request.args.get("k", 5))
+    except (TypeError, ValueError):
+        k = 5
+    k = max(1, min(k, 20))
+
+    max_dist = request.args.get("max_dist_m")
+    if max_dist is not None:
+        try:
+            max_dist = float(max_dist)
+        except (TypeError, ValueError):
+            max_dist = None
+
+    robot_id = request.args.get("robot_id")
+    x_arg = request.args.get("x")
+    y_arg = request.args.get("y")
+
+    if robot_id:
+        provider = _dispatcher.provider if _dispatcher else None
+        if provider is None or robot_id not in getattr(provider, "robots", {}):
+            return jsonify({"error": "POSE_UNAVAILABLE"}), 404
+        rs = {}
+        get_raw = getattr(provider, "raw_state", None)
+        if get_raw:
+            try:
+                rs = get_raw(robot_id) or {}
+            except Exception:
+                rs = {}
+        if rs.get("x") is None or rs.get("y") is None:
+            return jsonify({"error": "POSE_UNAVAILABLE"}), 404
+        px, py = float(rs["x"]), float(rs["y"])
+        pose_used = {
+            "x": px, "y": py,
+            "theta": rs.get("theta"),
+            "confidence": rs.get("confidence"),
+        }
+        source = "robot_state"
+    elif x_arg is not None and y_arg is not None:
+        try:
+            px, py = float(x_arg), float(y_arg)
+        except (TypeError, ValueError):
+            return jsonify({"error": "x and y must be numbers"}), 400
+        theta_arg = request.args.get("theta")
+        try:
+            theta = float(theta_arg) if theta_arg is not None else None
+        except (TypeError, ValueError):
+            theta = None
+        pose_used = {"x": px, "y": py, "theta": theta, "confidence": None}
+        source = "explicit_pose"
+    else:
+        return jsonify({"error": "robot_id or x&y required"}), 400
+
+    suggestions = _map_model.nearest_landmarks(px, py, k=k, max_dist_m=max_dist)
+    return jsonify({
+        "frame": "smap_meters",
+        "source": source,
+        "pose_used": pose_used,
+        "suggestions": suggestions,
+    })
+
+
 # ── Operator controls: manual jog / software STOP-ALL ─────────────────────────
 
 @app.route("/jog", methods=["POST", "OPTIONS"])

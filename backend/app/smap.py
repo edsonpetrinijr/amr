@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -156,6 +157,38 @@ class MapModel:
             "routes": [r.to_dict() for r in self.routes],
             "robot_pos": self.robot_pos.to_dict() if self.robot_pos else None,
         }
+
+    def nearest_landmarks(
+        self,
+        x: float,
+        y: float,
+        k: int = 5,
+        max_dist_m: Optional[float] = None,
+    ) -> list[dict]:
+        """Return the k nearest map landmarks to (x, y), sorted by Euclidean
+        distance ascending. Coordinates are in METRES (smap frame) — no scaling.
+
+        Each entry: {lm_id, name, x, y, theta, dist_m}. Landmark records in this
+        firmware carry no heading, so `theta` is always None and `name` mirrors
+        the landmark id. Tie-break is deterministic: equal distances order by
+        lm_id ascending (independent of map insertion order)."""
+        out: list[dict] = []
+        for lm in self.landmarks:
+            dist = math.hypot(lm.x - x, lm.y - y)
+            if max_dist_m is not None and dist > max_dist_m:
+                continue
+            out.append({
+                "lm_id": lm.id,
+                "name": lm.id,
+                "x": lm.x,
+                "y": lm.y,
+                "theta": None,
+                "dist_m": round(dist, 6),
+            })
+        out.sort(key=lambda e: (e["dist_m"], e["lm_id"]))
+        if k is not None and k >= 0:
+            return out[:k]
+        return out
 
 
 # ── Parser ────────────────────────────────────────────────────────────────────
