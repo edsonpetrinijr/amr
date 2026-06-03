@@ -54,7 +54,15 @@ export interface Robot {
   nav: string
   goal_x: number | null; goal_y: number | null; goal_station: string | null
   current_task: string | null; paused: boolean; last_seen: number
+  /** Real-world footprint in metres (top-down). length = along +theta (forward),
+   *  width = perpendicular. Optional: falls back to DEFAULT_FOOTPRINT if absent. */
+  footprint?: { length: number; width: number }
 }
+
+/** Shared default robot footprint in metres — mirror of backend
+ *  models.DEFAULT_FOOTPRINT_* . PLACEHOLDER pending founder confirmation of the
+ *  real chassis dimensions (AMR.step bbox is a sub-component, not the chassis). */
+export const DEFAULT_FOOTPRINT = { length: 0.70, width: 0.50 } as const
 
 export type StationType = 'callbutton' | 'base' | 'ap'
 export type CallbuttonState = 'idle' | 'ready' | 'called' | 'served'
