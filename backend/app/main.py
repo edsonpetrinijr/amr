@@ -76,7 +76,67 @@ app = Flask(__name__)
 
 _dispatcher: Optional[Dispatcher] = None
 _map_model  = None
+_map_name: Optional[str] = None   # filename of the live map, e.g. "1007.smap"
 _opcua_driver = None   # OpcUaCallbuttonDriver instance (set in _startup)
+
+# Guards the rare map swap (mutate _map_model/_map_name + re-feed sim walls)
+# against the running dispatcher/sim loop. NOT on the 10 Hz SSE hot path.
+_map_lock = threading.Lock()
+
+
+def _maps_dir() -> Path:
+    """Directory holding *.smap files. Matches the startup default
+    (Path(__file__).parents[2] / "maps"); MAPS_DIR env overrides it."""
+    override = os.getenv("MAPS_DIR", "").strip()
+    if override:
+        return Path(override).resolve()
+    return (Path(__file__).parents[2] / "maps").resolve()
+
+
+def _resolve_map_path(name_or_filename: str) -> Path:
+    """Resolve a bare .smap filename to an absolute path INSIDE the maps dir.
+    Rejects path traversal, separators, absolute paths and anything outside the
+    maps dir. Raises ValueError on any invalid/missing input."""
+    if not name_or_filename or not str(name_or_filename).strip():
+        raise ValueError("map name is required")
+    name = str(name_or_filename).strip()
+    # must be a bare filename — no separators, no parent refs
+    if name in (".", "..") or name != Path(name).name:
+        raise ValueError(f"invalid map name: {name!r}")
+    if not name.endswith(".smap"):
+        raise ValueError(f"map must be a .smap file: {name!r}")
+    maps_dir = _maps_dir()
+    path = (maps_dir / name).resolve()
+    try:
+        path.relative_to(maps_dir)   # defense in depth vs traversal
+    except ValueError:
+        raise ValueError(f"map path escapes maps dir: {name!r}")
+    if not path.is_file():
+        raise ValueError(f"map not found: {name!r}")
+    return path
+
+
+def _apply_map(name_or_filename: str) -> None:
+    """Atomically swap in a new live map by filename. Validates the name is a
+    safe *.smap inside the maps dir, loads it, sets _map_model/_map_name, logs
+    station-validation warnings, and (SIM_MODE) re-feeds walls to the sim laser
+    — exactly like startup. Raises ValueError on an invalid/missing map."""
+    global _map_model, _map_name
+    path = _resolve_map_path(name_or_filename)
+    model = load_map(path)            # parse outside the lock (I/O)
+    with _map_lock:
+        _map_model = model
+        _map_name = path.name
+        warns = validate_stations(model, config.STATIONS)
+        for w in warns:
+            log.warning("smap validation: %s", w)
+        if config.SIM_MODE and _dispatcher is not None:
+            provider = _dispatcher.provider
+            if hasattr(provider, "set_walls"):
+                provider.set_walls([
+                    ((w.start.x, w.start.y), (w.end.x, w.end.y))
+                    for w in model.walls
+                ])
 
 # Each SSE subscriber gets its own queue
 _subscribers: list[queue.Queue] = []
@@ -226,27 +286,21 @@ def _startup() -> None:
         "SMAP_PATH",
         str(Path(__file__).parents[2] / "maps" / "1007.smap")
     )
-    if Path(smap_path).exists():
-        _map_model = load_map(smap_path)
-        warns = validate_stations(_map_model, config.STATIONS)
-        for w in warns:
-            log.warning("smap validation: %s", w)
-    else:
-        log.warning("No .smap found at %s — map will be empty", smap_path)
 
     if config.SIM_MODE:
         provider = SimProvider()
-        # Feed map walls to the synthetic laser ray-caster (offline LiDAR sim).
-        if _map_model and hasattr(provider, "set_walls"):
-            provider.set_walls([
-                ((w.start.x, w.start.y), (w.end.x, w.end.y))
-                for w in _map_model.walls
-            ])
         log.info("Using SimProvider (SIM_MODE=true)")
     else:
         provider = SeerProvider()
         log.info("Using SeerProvider (SIM_MODE=false) — connecting to real AMRs")
     _dispatcher = Dispatcher(provider)
+
+    # Load the initial map through the SAME code path as runtime selection.
+    # SMAP_PATH gives the default; its basename is resolved inside the maps dir.
+    try:
+        _apply_map(Path(smap_path).name)
+    except ValueError as e:
+        log.warning("No usable .smap (%s) — map will be empty", e)
 
     # Sync broadcast wrapper (dispatcher is async internally but we bridge it)
     def _bridge(msg):
@@ -396,6 +450,42 @@ def get_map():
     if not _map_model:
         return jsonify({"error": "No map loaded"}), 404
     return jsonify(_map_model.to_dict())
+
+
+@app.route("/maps")
+def list_maps():
+    """List available *.smap files in the maps dir.
+    -> 200 [{"name": "1007.smap", "current": true}, ...] sorted by name."""
+    maps_dir = _maps_dir()
+    names = sorted(p.name for p in maps_dir.glob("*.smap")) if maps_dir.is_dir() else []
+    return jsonify([{"name": n, "current": (n == _map_name)} for n in names])
+
+
+@app.route("/maps/select", methods=["POST"])
+def select_map():
+    """Switch the live map at runtime.
+    body: {"name": "InnovationBox.smap"} — must be an available *.smap.
+    On success: re-feeds sim walls, broadcasts {"type":"map","map":...} to all
+    SSE clients, and returns {"ok": true, "name": name, "map": {...}}.
+    Invalid/missing/unknown name -> 400 {"error": "..."}."""
+    body = request.get_json(silent=True) or {}
+    name = body.get("name")
+    if not name or not isinstance(name, str):
+        return jsonify({"error": "missing 'name'"}), 400
+    name = name.strip()
+    maps_dir = _maps_dir()
+    available = {p.name for p in maps_dir.glob("*.smap")} if maps_dir.is_dir() else set()
+    if name not in available:
+        return jsonify({"error": f"unknown map: {name}"}), 400
+    try:
+        _apply_map(name)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    with _map_lock:
+        map_dict = _map_model.to_dict()
+    _broadcast({"type": "map", "map": map_dict})
+    log.info("map switched to %s (%d SSE clients notified)", name, len(_subscribers))
+    return jsonify({"ok": True, "name": name, "map": map_dict})
 
 
 @app.route("/stations")
