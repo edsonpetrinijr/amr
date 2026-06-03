@@ -57,7 +57,15 @@ so building is fast and parallel instead of one-at-a-time.
 | **Finance / Fundraising** | `finance.agent.md` | Unit economics, runway, pricing math, fundraising |
 | **Marketing / Brand** | `marketing.agent.md` | Positioning, messaging, landing copy, case studies |
 | **Legal / Compliance** | `legal-compliance.agent.md` | Safety standards, contracts, IP, liability |
+| **Idea Strategist / Incubator** | `idea-strategist.agent.md` | Matures & pressure-tests raw ideas, validates with specialists, prototypes in `idea/<slug>` branches |
 | **Repo Steward / Organizer** | `repo-steward.agent.md` | Organizes files, dedupes, enforces structure, tidies the repo after changes |
+
+## Daily routines (slash commands)
+Run these from chat as prompts (type `/` in the chat box). Both run as the CEO.
+- **`/morning-routine`** — start of day: catch up via `TIMELINE.md` + git log, orient, surface the backlog, and agree on ONE focus. Read-only.
+- **`/end-of-day-routine`** — end of day: review what got done, append a dated entry to `TIMELINE.md`, tidy via `repo-steward`, and tee up tomorrow.
+
+Prompt files live in `.github/prompts/`.
 
 ## How to use
 1. **Default:** open the CEO agent and tell it what you need — it routes and synthesizes.
