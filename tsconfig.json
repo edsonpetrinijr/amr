@@ -19,5 +19,5 @@
       "@/*": ["./frontend/*"]
     }
   },
-  "include": ["frontend", "electron"]
+  "include": ["frontend", "electron", "web"]
 }

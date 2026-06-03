@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "web": "vite --config vite.web.config.ts",
+    "dev:marketing": "vite --config vite.marketing.config.ts",
+    "build:marketing": "vite build --config vite.marketing.config.ts",
     "build": "tsc && vite build && electron-builder",
     "preview": "vite preview",
     "electron:dev": "vite",

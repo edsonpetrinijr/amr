@@ -16,6 +16,7 @@ export default tseslint.config(
       'dist-electron/**',
       'node_modules/**',
       'release/**',
+      'public/**',
       'backend/**',
       'docs/**',
       'maps/**',
@@ -27,7 +28,7 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ['frontend/**/*.{ts,tsx}', 'electron/**/*.{ts,tsx}'],
+    files: ['frontend/**/*.{ts,tsx}', 'electron/**/*.{ts,tsx}', 'web/**/*.{ts,tsx}'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'module',
