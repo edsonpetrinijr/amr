@@ -1,22 +1,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // RobotPreview3D — opt-in 3D preview of the selected AMR (Phase 2).
 //
-// ⚠️ STUB / NOT YET ACTIVE — this file is intentionally EXCLUDED from the build.
-//    The 3D dependencies (three / @react-three/fiber / @react-three/drei /
-//    @types/three) could NOT be installed: the npm registry was unreachable from
-//    the build environment (ECONNRESET to registry.npmjs.org). The component is
-//    written and ready; it is held out of `tsc`/`eslint`/`vite` until the deps
-//    exist, so the pipeline stays green. See docs/phase2-3d-preview.md.
-//
-// TO ACTIVATE (one-time, when the npm registry is reachable):
-//   1. npm install three @react-three/fiber @react-three/drei
-//      npm install -D @types/three
-//   2. Remove this file from `exclude` in tsconfig.json and from `ignores` in
-//      eslint.config.mjs.
-//   3. Wire the toggle + lazy panel into frontend/app/pages/Field.tsx
-//      (exact diff in docs/phase2-3d-preview.md).
-//   4. (Optional) Drop a real frontend/public/AMR.glb to replace the procedural
-//      box — the loader below auto-detects it and auto-scales mm→m.
+// Renders the real CAD model (public/AMR.glb, converted from AMR.step) fitted to
+// the founder-confirmed real footprint (0.95 L × 0.65 W × 0.25 H m), or a to-scale
+// procedural box if the GLB ever fails to load.
 //
 // Isolation guarantees: this component is lazy-loaded (so three.js is NOT in the
 // initial bundle), only mounts when the 3D panel is toggled ON, and never reads
@@ -30,8 +17,8 @@ import * as THREE from 'three'
 import type { Robot } from '../api/types'
 import { DEFAULT_FOOTPRINT, DEFAULT_HEIGHT_M } from '../api/types'
 
-// Path is resolved by Vite from the public/ root at runtime. Swapping in a real
-// model is a one-line change: drop frontend/public/AMR.glb and it's used.
+// Path is resolved by Vite from the public/ root at runtime (public/AMR.glb is
+// served at /AMR.glb).
 const GLB_URL = '/AMR.glb'
 
 // Map robot status → chassis colour (matches the 2D map's status semantics).
@@ -70,33 +57,99 @@ function ProceduralChassis({ robot }: { robot: Robot }) {
   )
 }
 
-/** Real GLB model. STEP exports are often in mm; if the model's bounding box is
- *  > ~10 units we assume mm and scale by 0.001 so it renders at true metres. */
-function GltfChassis() {
+/** Real GLB model. The CAD model (AMR.step) is authored at ~1:10.5 scale and is
+ *  Z-up, so we fit its bounding box to the founder-confirmed real footprint and
+ *  reorient it to the app's convention: Y up, length along +X, width along +Z,
+ *  sitting on the floor. This makes it render at true size against the 0.25 m grid
+ *  regardless of the model's internal units/orientation. */
+function GltfChassis({ robot }: { robot: Robot }) {
   const { scene } = useGLTF(GLB_URL)
-  const { clone, scale } = useMemo(() => {
+  const node = useMemo(() => {
     const c = scene.clone(true)
-    const box = new THREE.Box3().setFromObject(c)
+
+    // Measure the model-local AABB (clone is still at identity here).
     const size = new THREE.Vector3()
-    box.getSize(size)
-    const maxDim = Math.max(size.x, size.y, size.z)
-    return { clone: c, scale: maxDim > 10 ? 0.001 : 1 }
-  }, [scene])
-  return <primitive object={clone} scale={scale} />
+    new THREE.Box3().setFromObject(c).getSize(size)
+
+    // Rank the three local axes by extent: largest → length, middle → width,
+    // smallest → height. Robust to whatever axis convention the CAD used.
+    const fp = robot.footprint ?? DEFAULT_FOOTPRINT
+    const real = [fp.length, fp.width, DEFAULT_HEIGHT_M] // by rank, desc
+    const world = [
+      new THREE.Vector3(1, 0, 0), // length → world +X (forward / +theta)
+      new THREE.Vector3(0, 0, 1), // width  → world +Z
+      new THREE.Vector3(0, 1, 0), // height → world +Y (up)
+    ]
+    const ranked = (['x', 'y', 'z'] as const)
+      .map((axis) => ({ axis, ext: size[axis] }))
+      .sort((a, b) => b.ext - a.ext)
+
+    const scale = { x: 1, y: 1, z: 1 }
+    const img: Record<'x' | 'y' | 'z', THREE.Vector3> = {
+      x: new THREE.Vector3(),
+      y: new THREE.Vector3(),
+      z: new THREE.Vector3(),
+    }
+    ranked.forEach((r, i) => {
+      scale[r.axis] = r.ext > 1e-6 ? real[i] / r.ext : 1
+      img[r.axis].copy(world[i])
+    })
+
+    // Rotation that maps each local axis to its target world axis. Fix handedness
+    // (a reflection would mirror the model) by flipping the width axis if needed.
+    const m = new THREE.Matrix4().makeBasis(img.x, img.y, img.z)
+    if (m.determinant() < 0) {
+      img[ranked[1].axis].multiplyScalar(-1)
+      m.makeBasis(img.x, img.y, img.z)
+    }
+
+    c.scale.set(scale.x, scale.y, scale.z)
+    c.quaternion.setFromRotationMatrix(m)
+    c.updateMatrixWorld(true)
+
+    // Centre on X/Z and sit on the floor (min.y = 0).
+    const fitted = new THREE.Box3().setFromObject(c)
+    c.position.x -= (fitted.min.x + fitted.max.x) / 2
+    c.position.z -= (fitted.min.z + fitted.max.z) / 2
+    c.position.y -= fitted.min.y
+    return c
+  }, [scene, robot.footprint])
+
+  return <primitive object={node} />
 }
 
-/** Decide GLB vs procedural at module scope. useGLTF will throw (caught by the
- *  parent <Suspense>/error path) if /AMR.glb is absent; we guard by attempting
- *  the load lazily and falling back. For simplicity we render procedural unless a
- *  GLB has been dropped in — toggle HAS_GLB true once you add public/AMR.glb. */
-const HAS_GLB = false // ← set true after dropping frontend/public/AMR.glb
+/** Error boundary: if the GLB fails to load/parse, render the to-scale procedural
+ *  chassis instead so the panel never goes blank. */
+class GlbBoundary extends React.Component<
+  { robot: Robot; children: React.ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false }
+  static getDerivedStateFromError() {
+    return { failed: true }
+  }
+  render() {
+    if (this.state.failed) return <ProceduralChassis robot={this.props.robot} />
+    return this.props.children
+  }
+}
+
+// A real public/AMR.glb is committed; load it, falling back to the procedural box
+// only if it fails to load.
+const HAS_GLB = true
 
 function Robot3D({ robot }: { robot: Robot }) {
   // theta is the 2D heading (radians, CCW). Floor is the XZ plane (Y up), so a
   // +theta turn about the vertical axis is rotation.y = -theta.
   return (
     <group rotation={[0, -robot.theta, 0]}>
-      {HAS_GLB ? <GltfChassis /> : <ProceduralChassis robot={robot} />}
+      {HAS_GLB ? (
+        <GlbBoundary robot={robot}>
+          <GltfChassis robot={robot} />
+        </GlbBoundary>
+      ) : (
+        <ProceduralChassis robot={robot} />
+      )}
     </group>
   )
 }
@@ -141,5 +194,5 @@ export default function RobotPreview3D({ robot, className }: RobotPreview3DProps
   )
 }
 
-// Preload only matters once a real GLB exists; harmless no-op otherwise.
+// Preload the GLB so it's ready when the panel is first opened.
 if (HAS_GLB) useGLTF.preload(GLB_URL)

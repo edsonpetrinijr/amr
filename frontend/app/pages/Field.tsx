@@ -1,11 +1,15 @@
-import React, { useEffect, useRef, useState } from 'react'
-import { Map, Radar } from 'lucide-react'
+import React, { useEffect, useRef, useState, Suspense } from 'react'
+import { Map, Radar, Box } from 'lucide-react'
 import { useFleet } from '../state/store'
 import { fleetApi } from '../api/fleet'
 import { MapCanvas } from '../components/MapCanvas'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import type { Robot, Station } from '../api/types'
+
+// Lazy-loaded so three.js / R3F stay out of the initial bundle; only fetched when
+// the 3D panel is first toggled on.
+const RobotPreview3D = React.lazy(() => import('../components/RobotPreview3D'))
 
 const STATUS_VARIANT: Record<string, 'success' | 'destructive' | 'default' | 'secondary' | 'outline'> = {
   idle:           'outline',
@@ -143,6 +147,7 @@ export function Field() {
 
   // ── Laser layer (dedicated PULL endpoint, polled ~2.5 Hz while ON) ──────────
   const [laserOn, setLaserOn]       = useState(false)
+  const [show3D, setShow3D]         = useState(false)
   const [laserBeams, setLaserBeams] = useState<[number, number][]>([])
   // Refs keep the poller reading the latest selection/robots without re-arming
   // the interval on every 10 Hz SSE world frame.
@@ -192,6 +197,12 @@ export function Field() {
             <Radar className="w-3.5 h-3.5" />
             Laser
           </button>
+          <button onClick={() => setShow3D(v => !v)}
+            className={`flex items-center gap-1.5 px-2 py-1 rounded border transition-colors
+              ${show3D ? 'border-[#58a6ff] text-[#58a6ff] bg-[#58a6ff]/10' : 'border-[#30363d] hover:bg-[#161b22]'}`}>
+            <Box className="w-3.5 h-3.5" />
+            3D
+          </button>
           <span>{robots.length} robots</span>
           <span>·</span>
           <span>{stations.length} stations</span>
@@ -217,6 +228,13 @@ export function Field() {
         </div>
         {selectedRobot   && <RobotPanel   robot={selectedRobot}   stations={stations} onClose={() => setSelectedRobot(null)} />}
         {selectedStation && <StationPanel station={selectedStation} robots={robots}   onClose={() => setSelectedStation(null)} />}
+        {/* Opt-in 3D preview. Conditional mount = the R3F canvas (and three.js)
+            never load while the panel is off. Falls back to the first robot. */}
+        {show3D && (selectedRobot ?? robots[0]) && (
+          <Suspense fallback={<div className="w-80 flex-shrink-0 bg-[#161b22] border-l border-[#30363d]" />}>
+            <RobotPreview3D robot={(selectedRobot ?? robots[0])!} className="w-80 flex-shrink-0 border-l border-[#30363d]" />
+          </Suspense>
+        )}
       </div>
 
       {/* Robot strip */}

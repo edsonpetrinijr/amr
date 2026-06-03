@@ -19,8 +19,5 @@
       "@/*": ["./frontend/*"]
     }
   },
-  "include": ["frontend", "electron"],
-  "exclude": [
-    "frontend/app/components/RobotPreview3D.tsx"
-  ]
+  "include": ["frontend", "electron"]
 }
