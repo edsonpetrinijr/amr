@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import socket
 import threading
 import time
@@ -34,9 +35,103 @@ log = logging.getLogger(__name__)
 
 CONN_TIMEOUT   = 3.0    # seconds to wait for connect
 READ_TIMEOUT   = 5.0    # seconds to wait for a reply
-POLL_INTERVAL  = 0.5    # seconds between state polls
+POLL_INTERVAL  = 0.1    # seconds between pose polls (~10 Hz loc+speed+task)
+SLOW_INTERVAL  = 1.0    # seconds between battery/info polls (~1 Hz)
 LASER_INTERVAL = 0.5    # seconds between laser scans (~2 Hz; not every state tick adds load)
 RECONNECT_WAIT = 5.0    # seconds before retry after disconnection
+
+LASER_MAX_RANGE = 30.0  # metres; reject beams beyond this as noise/inf
+LASER_MAX_POINTS = 720  # decimate world beams to bound payload size
+
+
+def _laser_reply_to_world_beams(reply: dict, x: float, y: float, theta: float) -> list:
+    """Convert a SEER 1009 laser reply into WORLD-frame [[x, y], …] beams.
+
+    Real-HW firmware rarely returns ready-made world-frame `laser_beams`; it
+    publishes a POLAR scan in the ROBOT frame. We handle several shapes
+    defensively (field names are best-effort, to be CONFIRMED on first real-HW
+    bring-up):
+      0. `laser_beams` already a non-empty list of [x, y] pairs → pass through
+         (sim/tests + any firmware that does the transform for us).
+      a. parallel arrays `angle_min` + `angle_increment` + (`distance`|`ranges`).
+      b. list of per-beam objects {angle, distance|dist}.
+      c. list of robot-frame points {x, y}.
+    Robot→world: wx = x + xr*cosθ - yr*sinθ ; wy = y + xr*sinθ + yr*cosθ.
+    Returns [] on anything unexpected, decimated to ≤LASER_MAX_POINTS.
+    """
+    if not isinstance(reply, dict):
+        return []
+    try:
+        # 0. Back-compat: already world-frame [x, y] pairs.
+        lb = reply.get('laser_beams')
+        if isinstance(lb, list) and lb and isinstance(lb[0], (list, tuple)) and len(lb[0]) >= 2:
+            return _decimate(lb)
+
+        cos_t, sin_t = math.cos(theta), math.sin(theta)
+
+        def to_world(xr, yr):
+            return [x + xr * cos_t - yr * sin_t, y + xr * sin_t + yr * cos_t]
+
+        def valid(d):
+            return d is not None and 0.0 < d < LASER_MAX_RANGE and not math.isinf(d) and not math.isnan(d)
+
+        # Search common container keys for the scan payload.
+        containers = [reply, reply.get('data'), reply.get('laserData')]
+        lasers = reply.get('lasers')
+        if isinstance(lasers, list):
+            containers.extend(lasers)
+        elif isinstance(lasers, dict):
+            containers.append(lasers)
+
+        for c in containers:
+            if not isinstance(c, dict):
+                continue
+
+            # a. polar parallel arrays.
+            angle_min = c.get('angle_min')
+            angle_inc = c.get('angle_increment')
+            ranges = c.get('distance')
+            if ranges is None:
+                ranges = c.get('ranges')
+            if angle_min is not None and angle_inc is not None and isinstance(ranges, list):
+                out = []
+                for i, d in enumerate(ranges):
+                    if not valid(d):
+                        continue
+                    ang = angle_min + i * angle_inc
+                    out.append(to_world(d * math.cos(ang), d * math.sin(ang)))
+                if out:
+                    return _decimate(out)
+
+            # b/c. list of per-beam objects under common keys.
+            for key in ('beams', 'points', 'laser_beams'):
+                seq = c.get(key)
+                if not isinstance(seq, list) or not seq or not isinstance(seq[0], dict):
+                    continue
+                out = []
+                for p in seq:
+                    if 'angle' in p and ('distance' in p or 'dist' in p):
+                        d = p.get('distance', p.get('dist'))
+                        if not valid(d):
+                            continue
+                        ang = p['angle']
+                        out.append(to_world(d * math.cos(ang), d * math.sin(ang)))
+                    elif 'x' in p and 'y' in p:
+                        out.append(to_world(p['x'], p['y']))
+                if out:
+                    return _decimate(out)
+    except Exception:
+        return []
+    return []
+
+
+def _decimate(beams: list) -> list:
+    """Subsample to at most LASER_MAX_POINTS points, preserving order."""
+    n = len(beams)
+    if n <= LASER_MAX_POINTS:
+        return [list(b) for b in beams]
+    stride = (n + LASER_MAX_POINTS - 1) // LASER_MAX_POINTS
+    return [list(beams[i]) for i in range(0, n, stride)]
 
 
 @dataclass
@@ -147,6 +242,7 @@ class RobotConn:
         self._stop    = threading.Event()
         self._seq     = 0
         self._last_laser = 0.0    # monotonic-ish gate for laser fetch (~2 Hz)
+        self._last_slow  = 0.0    # gate for battery/info fetch (~1 Hz)
         self._sock: Optional[socket.socket] = None   # persistent state socket
         self._thread: Optional[threading.Thread] = None
 
@@ -235,8 +331,12 @@ class RobotConn:
             return None
 
     def _poll_once(self, sock: socket.socket) -> bool:
-        """Send loc + task queries and update state. Returns False on socket error."""
+        """Poll pose-critical state and update RobotState. Returns False on socket
+        error. Cadence is decoupled: loc+speed+task every call (~10 Hz), while
+        battery+info (1 Hz) and laser (2 Hz) are gated to avoid slowing the loop."""
         try:
+            now = time.time()
+            slow = now - self._last_slow >= SLOW_INTERVAL
             # ── Location ──────────────────────────────────────────────────────
             sock.sendall(pack_msg(self._next_seq(), robot_status_loc_req, {}))
             loc = _recv_reply(sock)
@@ -247,15 +347,19 @@ class RobotConn:
             task = _recv_reply(sock)
             if task is None:
                 return False
-            # ── Battery (authoritative source: request 1007) ──────────────────
-            sock.sendall(pack_msg(self._next_seq(), robot_status_battery_req, {}))
-            batt = _recv_reply(sock)  # None is tolerated here
-            # ── Robot info (model only; 1000 does NOT carry battery_level) ─────
-            sock.sendall(pack_msg(self._next_seq(), robot_status_info_req, {}))
-            info = _recv_reply(sock)  # None is tolerated here
-
+            # ── Speed (pose-critical) ─────────────────────────────────────────
             sock.sendall(pack_msg(self._next_seq(), robot_status_speed_req, {}))
             speed = _recv_reply(sock)  # None tolerated
+            if speed is None:
+                return False
+            # ── Battery + info (gated to ~1 Hz; keep last-known when skipped) ──
+            batt = info = None
+            if slow:
+                sock.sendall(pack_msg(self._next_seq(), robot_status_battery_req, {}))
+                batt = _recv_reply(sock)  # None tolerated
+                sock.sendall(pack_msg(self._next_seq(), robot_status_info_req, {}))
+                info = _recv_reply(sock)  # None tolerated
+                self._last_slow = now
 
             updates: dict = {}
             if loc:
@@ -303,16 +407,16 @@ class RobotConn:
             # ── Laser scan (gated to ~2 Hz; INLINE on the persistent socket) ──
             # Fetched on the SAME poll socket (request→reply paired) instead of
             # opening a second concurrent 19204 connection via get_laser(), which
-            # could fail/return nothing on real hardware. The PDF (p.24) confirms
-            # `laser_beams` is [[x, y], …] in the WORLD/MAP frame, so the frontend
-            # renders them with NO pose composition.
-            now = time.time()
+            # could fail/return nothing on real hardware. The 1009 reply is POLAR
+            # in the ROBOT frame on real HW, so we transform to WORLD here using
+            # the freshly-updated pose (loc applied above).
             if now - self._last_laser >= LASER_INTERVAL:
                 sock.sendall(pack_msg(self._next_seq(), robot_status_laser_req, {'step': 4}))
                 laser = _recv_reply(sock)  # None tolerated
                 if laser is None:
                     return False
-                beams = laser.get('laser_beams', [])
+                beams = _laser_reply_to_world_beams(
+                    laser, self.state.x, self.state.y, self.state.theta)
                 self.state.update(laser_beams=beams, laser_ts=now)
                 self._last_laser = now
 
@@ -326,18 +430,18 @@ class RobotConn:
 
     def get_laser(self, step: int = 4) -> list:
         """Pull one laser scan (request 1009) over a FRESH connection. `step` is
-        the decimation stride (3–5; lower = more points). Returns the
-        `laser_beams` array or [] on failure. The protocol PDF (p.24) confirms
-        beams are already in the WORLD/MAP frame as [x, y] metres, so the
-        frontend renders them with NO pose composition — that assumption is
-        correct. NOTE: the poll thread fetches laser INLINE on its persistent
+        the decimation stride (3–5; lower = more points). Returns WORLD-frame
+        [x, y] beams (via _laser_reply_to_world_beams) or [] on failure. On real
+        HW the 1009 reply is POLAR/robot-frame, so we transform using the last
+        known pose. NOTE: the poll thread fetches laser INLINE on its persistent
         socket; this standalone method exists for the GET /robots/<id>/laser
         endpoint and deliberately opens its own connection."""
         reply = _cmd(self.ip, API_PORT_STATE, self._next_seq(),
                      robot_status_laser_req, {'step': step})
         if not reply:
             return []
-        return reply.get('laser_beams', [])
+        return _laser_reply_to_world_beams(
+            reply, self.state.x, self.state.y, self.state.theta)
 
     def goto_target(self, landmark_id: str) -> bool:
         """Send the robot to a SEER landmark (LM1, LM2 …). Returns True if ACK received."""
