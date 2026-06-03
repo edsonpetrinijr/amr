@@ -138,6 +138,34 @@ function NavCloud({ navPoints }: { navPoints: MapModel['nav_points'] }) {
   )
 }
 
+// ── Laser cloud ───────────────────────────────────────────────────────────────
+// World/map-frame [x,y] beams (same contract as the 2D canvas), drawn just above
+// the floor. Decimated like NavCloud to keep the point count bounded.
+
+const MAX_LASER_PTS = 1500
+
+function LaserPoints({ beams }: { beams: [number, number][] }) {
+  const geom = useMemo(() => {
+    const step = Math.max(1, Math.floor(beams.length / MAX_LASER_PTS))
+    const g = new THREE.BufferGeometry()
+    const pts: number[] = []
+    for (let i = 0; i < beams.length; i += step) {
+      const b = beams[i]
+      pts.push(b[0], 0.06, b[1])   // seer x → three.x, seer y → three.z
+    }
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3))
+    return g
+  }, [beams])
+
+  if (beams.length === 0) return null
+
+  return (
+    <points geometry={geom}>
+      <pointsMaterial color="#f0883e" size={0.09} sizeAttenuation transparent opacity={0.85} />
+    </points>
+  )
+}
+
 // ── Stations ──────────────────────────────────────────────────────────────────
 
 function Stations({ stations, onClickStation, selectedId }: {
@@ -251,25 +279,32 @@ function RobotMesh({ robot, robotsRef, onClickRobot, selectedId }: {
   selectedId?: string | null
 }) {
   const groupRef = useRef<THREE.Group>(null)
-  const lastX = useRef(robot.x)
-  const lastZ = useRef(robot.y)
-  const lastTheta = useRef(robot.theta)
+  // Currently-displayed pose, initialised to the robot's real pose so a freshly
+  // mounted robot starts in the right place (no lerp-in from origin).
+  const dispX = useRef(robot.x)
+  const dispZ = useRef(robot.y)
+  const dispTheta = useRef(robot.theta)
 
   const fp = robot.footprint ?? DEFAULT_FOOTPRINT
   const color = STATUS_COLOR[robot.status] ?? '#8b949e'
   const isSelected = robot.id === selectedId
 
-  // Poll robotsRef at 10 Hz; update THREE object directly — zero React re-renders.
-  useFrame(() => {
+  // Read the latest target pose from robotsRef each frame and ease toward it.
+  // The 10 Hz pose stream would step visibly if snapped; smoothing at 60fps
+  // removes the stutter. `k` is framerate-aware (≈200ms catch-up) so it looks
+  // identical regardless of refresh rate.
+  useFrame((_state, delta) => {
     const r = robotsRef.current.find(x => x.id === robot.id)
     if (!r || !groupRef.current) return
-    if (r.x !== lastX.current || r.y !== lastZ.current || r.theta !== lastTheta.current) {
-      lastX.current     = r.x
-      lastZ.current     = r.y
-      lastTheta.current = r.theta
-      groupRef.current.position.set(r.x, 0, r.y)
-      groupRef.current.rotation.set(0, -r.theta, 0)
-    }
+    const k = 1 - Math.pow(0.001, delta)
+    dispX.current += (r.x - dispX.current) * k
+    dispZ.current += (r.y - dispZ.current) * k
+    // Shortest-angle interpolation so theta never spins the long way round.
+    let d = r.theta - dispTheta.current
+    d = Math.atan2(Math.sin(d), Math.cos(d))
+    dispTheta.current += d * k
+    groupRef.current.position.set(dispX.current, 0, dispZ.current)
+    groupRef.current.rotation.set(0, -dispTheta.current, 0)
   })
 
   return (
@@ -330,7 +365,7 @@ function CameraResetHandler({
 // ── Inner scene ───────────────────────────────────────────────────────────────
 
 function MapScene({
-  map, robots, stations, robotsRef, onClickRobot, onClickStation, selectedId, resetSignal,
+  map, robots, stations, robotsRef, onClickRobot, onClickStation, selectedId, resetSignal, laserBeams,
 }: {
   map: MapModel
   robots: Robot[]
@@ -340,6 +375,7 @@ function MapScene({
   onClickStation?: (s: Station) => void
   selectedId?: string | null
   resetSignal: number
+  laserBeams?: [number, number][]
 }) {
   const { minX, maxX, minZ, maxZ, mapCX, mapCZ } = useMemo(() => {
     const minX = map.min_pos.x
@@ -374,6 +410,7 @@ function MapScene({
       <MapGrid    minX={minX} maxX={maxX} minZ={minZ} maxZ={maxZ} />
       <Walls      walls={map.walls} />
       <NavCloud   navPoints={map.nav_points} />
+      <LaserPoints beams={laserBeams ?? []} />
       <Stations   stations={stations} onClickStation={onClickStation} selectedId={selectedId} />
       <Landmarks  landmarks={map.landmarks} />
 
@@ -402,12 +439,13 @@ export interface MapCanvas3DProps {
   selectedId?: string | null
   robotsRef: React.MutableRefObject<Robot[]>
   className?: string
+  laserBeams?: [number, number][]
 }
 
 // ── Root export ───────────────────────────────────────────────────────────────
 
 function MapCanvas3DInner(props: MapCanvas3DProps) {
-  const { map, robots = [], stations = [], onClickRobot, onClickStation, selectedId, robotsRef, className } = props
+  const { map, robots = [], stations = [], onClickRobot, onClickStation, selectedId, robotsRef, className, laserBeams } = props
 
   const mapCX = (map.min_pos.x + map.max_pos.x) / 2
   const mapCZ = (map.min_pos.y + map.max_pos.y) / 2
@@ -449,6 +487,7 @@ function MapCanvas3DInner(props: MapCanvas3DProps) {
           onClickStation={onClickStation}
           selectedId={selectedId}
           resetSignal={resetSignal}
+          laserBeams={laserBeams}
         />
       </Canvas>
     </div>
