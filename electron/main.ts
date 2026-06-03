@@ -40,6 +40,12 @@ function createWindow() {
   win.webContents.once('did-finish-load', () => {
     console.log('[fleet] renderer ready')
   })
+
+  // Surface a hard load failure (missing asset, bad path) instead of silently
+  // showing a blank window — logged for field diagnostics on isolated LAN PCs.
+  win.webContents.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL) => {
+    console.error(`[fleet] renderer failed to load: ${errorCode} ${errorDescription} (${validatedURL})`)
+  })
 }
 
 app.on('window-all-closed', () => {
