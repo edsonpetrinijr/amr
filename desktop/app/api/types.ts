@@ -177,6 +177,15 @@ export interface RelocalizeSuggestionsResponse {
   suggestions: RelocalizeSuggestion[]
 }
 
+/** POST /robots/<id>/navigate response — robot dispatched to a map landmark. */
+export interface NavigateResult {
+  ok: boolean
+  robot_id: string
+  landmark_id: string
+  x: number
+  y: number
+}
+
 // ── Manual control / analytics (Sprint endpoints) ─────────────────────────────
 
 /** POST /jog → {ok, robot_id, vx, vy, w, duration, clamped, halted} */

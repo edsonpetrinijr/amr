@@ -1,11 +1,13 @@
 import React, { useEffect, useRef, useState, Suspense, lazy } from 'react'
-import { Map, Radar, Box, LayoutGrid } from 'lucide-react'
+import { Map, Radar, Box, LayoutGrid, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, RotateCw, RotateCcw, Square } from 'lucide-react'
+import { toast } from 'sonner'
 import { useFleet } from '../state/store'
-import { fleetApi } from '../api/fleet'
+import { fleetApi, FleetApiError } from '../api/fleet'
+import { useJog, type JogDir } from '../hooks/useJog'
 import { MapCanvas } from '../components/MapCanvas'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
-import type { Robot, Station } from '../api/types'
+import type { Robot, Station, Landmark } from '../api/types'
 
 // Lazy-loaded so three.js / R3F stay out of the initial bundle; only fetched when
 // the 3D map is first rendered.
@@ -23,18 +25,42 @@ const STATUS_VARIANT: Record<string, 'success' | 'destructive' | 'default' | 'se
   offline:        'destructive',
 }
 
-function RobotPanel({ robot, stations, onClose }: { robot: Robot; stations: Station[]; onClose: () => void }) {
+function RobotPanel({ robot, landmarks, onClose }: { robot: Robot; landmarks: Landmark[]; onClose: () => void }) {
   const [sending, setSending] = useState(false)
-  const [dropoffId, setDropoffId] = useState('')
-  const aps = stations.filter(s => s.type === 'ap' || s.type === 'callbutton')
+  const [landmarkId, setLandmarkId] = useState('')
   const battColor = robot.battery < 25 ? 'text-red-400' : robot.battery < 50 ? 'text-yellow-400' : 'text-green-400'
 
-  async function handleSendTask() {
-    if (!dropoffId) return
+  // Manual jog — keyboard listeners are global, so mounting this panel enables WASD.
+  // Disabled while the robot is offline or busy (backend would 409 anyway).
+  const jogDisabled = robot.status === 'offline' || robot.current_task != null
+  const { active, startDir, stopDir, stopAll } = useJog(jogDisabled ? null : robot.id)
+
+  const holdProps = (dir: JogDir) => ({
+    onMouseDown: (e: React.MouseEvent) => { e.preventDefault(); startDir(dir) },
+    onMouseUp: () => stopDir(dir),
+    onMouseLeave: () => stopDir(dir),
+    onTouchStart: (e: React.TouchEvent) => { e.preventDefault(); startDir(dir) },
+    onTouchEnd: (e: React.TouchEvent) => { e.preventDefault(); stopDir(dir) },
+  })
+  const dirClass = (dir: JogDir) =>
+    active.has(dir) ? 'border-[#58a6ff] bg-[#1f6feb]/20 text-[#58a6ff]' : ''
+
+  async function handleNavigate() {
+    if (!landmarkId) return
     setSending(true)
-    try { await fleetApi.createTask(robot.id, dropoffId) }
-    catch (e) { console.error(e) }
-    finally { setSending(false) }
+    try {
+      const res = await fleetApi.navigateToLandmark(robot.id, landmarkId)
+      toast.success('Navegando', { description: `${res.robot_id} → ${res.landmark_id}` })
+    } catch (e) {
+      if (e instanceof FleetApiError) {
+        if (e.status === 409)      toast.error('Navegação recusada', { description: e.message })
+        else if (e.status === 404) toast.error('Não encontrado', { description: e.message })
+        else if (e.status === 400) toast.error('Comando inválido', { description: e.message })
+        else                       toast.error('Falha na navegação', { description: e.message })
+      } else {
+        toast.error('Falha na navegação', { description: 'Backend inacessível' })
+      }
+    } finally { setSending(false) }
   }
 
   return (
@@ -55,19 +81,69 @@ function RobotPanel({ robot, stations, onClose }: { robot: Robot; stations: Stat
         <span className="text-[#8b949e]">Task</span>
         <span className="text-[#c9d1d9] font-mono">{robot.current_task ?? '—'}</span>
       </div>
+
+      {/* Send to landmark */}
       <div className="border-t border-[#30363d] pt-3">
-        <p className="text-xs text-[#8b949e] mb-2">Send to station</p>
+        <p className="text-xs text-[#8b949e] mb-2">Send to landmark</p>
         <select className="w-full text-xs bg-[#0d1117] border border-[#30363d] text-[#c9d1d9] rounded px-2 py-1 mb-2"
-          value={dropoffId} onChange={e => setDropoffId(e.target.value)}>
-          <option value="">— select destination —</option>
-          {aps.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+          value={landmarkId} onChange={e => setLandmarkId(e.target.value)}>
+          <option value="">— select landmark —</option>
+          {landmarks.map(lm => <option key={lm.id} value={lm.id}>{lm.id}</option>)}
         </select>
         <Button variant="primary" size="sm" className="w-full"
-          disabled={!dropoffId || sending || robot.status === 'offline'}
-          onClick={handleSendTask}>
-          {sending ? 'Sending…' : 'Dispatch'}
+          disabled={!landmarkId || sending || robot.status === 'offline'}
+          onClick={handleNavigate}>
+          {sending ? 'Sending…' : 'Navigate'}
         </Button>
       </div>
+
+      {/* Manual jog D-pad */}
+      <div className="border-t border-[#30363d] pt-3">
+        <p className="text-xs text-[#8b949e] mb-1">Manual jog</p>
+        <p className="text-[10px] text-[#6e7681] mb-2">
+          <span className="text-[#c9d1d9] font-mono">WASD</span> para mover,
+          {' '}<span className="text-[#c9d1d9] font-mono">Q/E</span> girar.
+        </p>
+        {jogDisabled ? (
+          <p className="text-[10px] text-[#6e7681] py-2">
+            {robot.status === 'offline' ? 'Robô offline.' : 'Indisponível com tarefa ativa.'}
+          </p>
+        ) : (
+          <>
+            <div className="grid grid-cols-3 gap-1.5 w-fit mx-auto mb-2">
+              <div />
+              <Button variant="outline" size="icon" {...holdProps('forward')} className={dirClass('forward')}>
+                <ChevronUp className="w-4 h-4" />
+              </Button>
+              <div />
+              <Button variant="outline" size="icon" {...holdProps('left')} className={dirClass('left')}>
+                <ChevronLeft className="w-4 h-4" />
+              </Button>
+              <Button variant="outline" size="icon" onClick={stopAll}
+                className="border-red-800 text-red-400 hover:bg-red-900/20">
+                <Square className="w-3.5 h-3.5" />
+              </Button>
+              <Button variant="outline" size="icon" {...holdProps('right')} className={dirClass('right')}>
+                <ChevronRight className="w-4 h-4" />
+              </Button>
+              <div />
+              <Button variant="outline" size="icon" {...holdProps('back')} className={dirClass('back')}>
+                <ChevronDown className="w-4 h-4" />
+              </Button>
+              <div />
+            </div>
+            <div className="flex gap-2 justify-center">
+              <Button variant="outline" size="sm" {...holdProps('ccw')} className={dirClass('ccw')}>
+                <RotateCcw className="w-3.5 h-3.5 mr-1" /> CCW
+              </Button>
+              <Button variant="outline" size="sm" {...holdProps('cw')} className={dirClass('cw')}>
+                <RotateCw className="w-3.5 h-3.5 mr-1" /> CW
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
+
       {robot.current_task && (
         <Button variant="outline" size="sm" className="border-red-700 text-red-400 hover:bg-red-900/20"
           onClick={() => fleetApi.cancelTask(robot.current_task!)}>
@@ -261,6 +337,7 @@ export function Field() {
                   selectedId={selectedId}
                   onClickRobot={selectRobot}
                   onClickStation={selectStation}
+                  laserBeams={laserOn ? laserBeams : undefined}
                   className="w-full h-full"
                 />
               </Suspense>
@@ -279,7 +356,7 @@ export function Field() {
             </div>
           )}
         </div>
-        {selectedRobot   && <RobotPanel   robot={selectedRobot}   stations={stations} onClose={() => setSelectedRobot(null)} />}
+        {selectedRobot   && <RobotPanel   robot={selectedRobot}   landmarks={map?.landmarks ?? []} onClose={() => setSelectedRobot(null)} />}
         {selectedStation && <StationPanel station={selectedStation} robots={robots}   onClose={() => setSelectedStation(null)} />}
         {/* Opt-in 3D side preview panel. Conditional mount = R3F canvas never loads while off. */}
         {show3DPanel && (selectedRobot?.id ?? robots[0]?.id) && (

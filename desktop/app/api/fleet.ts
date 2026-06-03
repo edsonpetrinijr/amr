@@ -8,6 +8,7 @@ import type {
   StatsSummary, RobotTelemetry, TasksHistory, LaserScan,
   RelocalizeSuggestionsResponse,
   RobotMutationResult, ProbeResult, OpcuaTestResult, StationMutationResult,
+  NavigateResult,
 } from './types'
 
 const BASE: string = import.meta.env?.VITE_FLEET_URL ?? 'http://localhost:8765'
@@ -185,6 +186,14 @@ export const fleetApi = {
 
   cancelTask: (id: string)                       =>
     _json(`/tasks/${id}`, { method: 'DELETE' }),
+
+  /** POST /robots/<id>/navigate — send a robot directly to a map landmark.
+   *  Surfaces 400/404/409/503 via FleetApiError so the UI can show the message. */
+  navigateToLandmark: (robot_id: string, landmark_id: string) =>
+    _jsonOrError(`/robots/${robot_id}/navigate`, {
+      method: 'POST',
+      body: JSON.stringify({ landmark_id }),
+    }) as Promise<NavigateResult>,
 
   buttonPress: (stationId: string, dir: 'fwd' | 'ret') =>
     _json(`/button/${stationId}`, { method: 'POST', body: JSON.stringify({ dir }) }),
