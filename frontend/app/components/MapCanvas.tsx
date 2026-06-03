@@ -14,6 +14,7 @@
  */
 import React, { useMemo, useRef, useState, useCallback, useEffect } from 'react'
 import type { MapModel, Robot, Station, LaserScan } from '../api/types'
+import { DEFAULT_FOOTPRINT } from '../api/types'
 
 interface Props {
   map: MapModel
@@ -298,42 +299,53 @@ export function MapCanvas({ map, robots = [], stations = [], laser, onClickAP, o
         const isSelected = r.id === selectedId
         const cx = tx(r.x)
         const cy = ty(r.y)
-        const bodyR = 10
-        // Direction arrow end point (SEER theta: 0=east, CCW positive → svg-flipped)
-        const arrowLen = bodyR + 8
-        const ax = cx + arrowLen * Math.cos(r.theta)
-        const ay = cy - arrowLen * Math.sin(r.theta) // y-flipped
+
+        // Real-world footprint → pixels (scale is px/m). length is along +theta
+        // (forward / robot +x), width is perpendicular. Fall back to the shared
+        // default so in-flight features without a footprint still render.
+        const fp = r.footprint ?? DEFAULT_FOOTPRINT
+        const lenPx = Math.max(2, fp.length * scale)   // forward (local x)
+        const widPx = Math.max(2, fp.width * scale)    // lateral (local y)
+        const halfDiag = Math.hypot(lenPx, widPx) / 2  // for rings/labels
+
+        // SEER theta is CCW with y-up; SVG y is down, so screen-rotation = -theta.
+        // (Matches the legacy arrow: heading vector = (cos θ, -sin θ).)
+        const rotDeg = -r.theta * 180 / Math.PI
+
+        const barW = Math.max(widPx, 16)
+        const barY = cy + halfDiag + 4
 
         return (
           <g key={r.id}
             onClick={() => onClickRobot?.(r)}
             style={{ cursor: onClickRobot ? 'pointer' : 'default' }}
           >
-            {/* Selection ring */}
+            {/* Selection ring (unrotated, encloses the footprint) */}
             {isSelected && (
-              <circle cx={cx} cy={cy} r={bodyR + 6}
+              <circle cx={cx} cy={cy} r={halfDiag + 6}
                 fill="none" stroke={color} strokeWidth={1.5} strokeOpacity={0.5} strokeDasharray="4 2" />
             )}
-            {/* Body */}
-            <circle cx={cx} cy={cy} r={bodyR}
-              fill={color + '30'} stroke={color} strokeWidth={2}
-            />
-            {/* Direction arrow */}
-            {r.status !== 'offline' && (
-              <line x1={cx} y1={cy} x2={ax} y2={ay}
-                stroke={color} strokeWidth={2} strokeLinecap="round"
-              />
-            )}
-            {/* ID label */}
+            {/* Body + heading drawn in the robot's local frame, rotated by theta */}
+            <g transform={`translate(${cx},${cy}) rotate(${rotDeg})`}>
+              <rect x={-lenPx / 2} y={-widPx / 2} width={lenPx} height={widPx}
+                rx={Math.min(lenPx, widPx) * 0.18}
+                fill={color + '30'} stroke={color} strokeWidth={2} />
+              {/* Heading indicator → +x (forward) */}
+              {r.status !== 'offline' && (
+                <line x1={0} y1={0} x2={lenPx / 2 + 6} y2={0}
+                  stroke={color} strokeWidth={2} strokeLinecap="round" />
+              )}
+            </g>
+            {/* ID label (unrotated, centered) */}
             <text x={cx} y={cy + 1} textAnchor="middle" dominantBaseline="middle"
               fill={color} fontSize={7} fontFamily="monospace" fontWeight="bold">
               {r.id.replace('AMR-', '')}
             </text>
-            {/* Battery mini bar */}
-            <rect x={cx - bodyR} y={cy + bodyR + 3} width={bodyR * 2} height={3}
+            {/* Battery mini bar (unrotated, below footprint) */}
+            <rect x={cx - barW / 2} y={barY} width={barW} height={3}
               fill="#21262d" rx={1.5} />
-            <rect x={cx - bodyR} y={cy + bodyR + 3}
-              width={bodyR * 2 * (r.battery / 100)} height={3}
+            <rect x={cx - barW / 2} y={barY}
+              width={barW * (r.battery / 100)} height={3}
               fill={r.battery < 25 ? '#f85149' : color} rx={1.5} />
           </g>
         )
