@@ -60,9 +60,11 @@ export interface Robot {
 }
 
 /** Shared default robot footprint in metres — mirror of backend
- *  models.DEFAULT_FOOTPRINT_* . PLACEHOLDER pending founder confirmation of the
- *  real chassis dimensions (AMR.step bbox is a sub-component, not the chassis). */
-export const DEFAULT_FOOTPRINT = { length: 0.70, width: 0.50 } as const
+ *  models.DEFAULT_FOOTPRINT_* . Founder-confirmed real chassis spec:
+ *  L×W×H = 0.95 × 0.65 × 0.25 m (950 × 650 × 250 mm, incl. bumper strip). */
+export const DEFAULT_FOOTPRINT = { length: 0.95, width: 0.65 } as const
+/** Robot height in metres — used by the 3D preview only (not the 2D map). */
+export const DEFAULT_HEIGHT_M = 0.25
 
 export type StationType = 'callbutton' | 'base' | 'ap'
 export type CallbuttonState = 'idle' | 'ready' | 'called' | 'served'

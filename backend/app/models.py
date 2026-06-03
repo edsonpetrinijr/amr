@@ -30,15 +30,14 @@ T_RECOVERING = "recovering"
 # Top-down rectangle: length is along +theta (forward), width is perpendicular.
 # Rendered to scale on the 2D map (frontend MapCanvas) using map px/m.
 #
-# PLACEHOLDER — needs founder confirmation. The CAD at repo root (AMR.step,
-# AP242 from Onshape) parses cleanly (units = METRE, single shared origin) but
-# its global bounding box is only ~0.065 x 0.215 x 0.025 m — a thin sub-component
-# / bracket, NOT the full chassis. Those numbers are implausible as a robot
-# footprint, so we use a documented compact-AMR default below until the real
-# chassis dimensions are confirmed. Keep this the single source of truth; the
-# frontend mirrors it in api/types.ts (DEFAULT_FOOTPRINT).
-DEFAULT_FOOTPRINT_LENGTH_M = 0.70
-DEFAULT_FOOTPRINT_WIDTH_M = 0.50
+# Founder-confirmed real chassis spec: L×W×H = 0.95 × 0.65 × 0.25 m
+# (950 × 650 × 250 mm, including the bumper strip). length is along +theta
+# (forward), width is perpendicular, height is for the 3D preview only.
+# Keep this the single source of truth; the frontend mirrors it in
+# api/types.ts (DEFAULT_FOOTPRINT).
+DEFAULT_FOOTPRINT_LENGTH_M = 0.95
+DEFAULT_FOOTPRINT_WIDTH_M = 0.65
+DEFAULT_HEIGHT_M = 0.25
 
 
 def default_footprint() -> dict:
