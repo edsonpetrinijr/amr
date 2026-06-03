@@ -26,6 +26,26 @@ T_CANCELLED = "cancelled"
 T_FAILED = "failed"
 T_RECOVERING = "recovering"
 
+# ── Robot physical footprint (real-world, metres) ──────────────────────────────
+# Top-down rectangle: length is along +theta (forward), width is perpendicular.
+# Rendered to scale on the 2D map (frontend MapCanvas) using map px/m.
+#
+# PLACEHOLDER — needs founder confirmation. The CAD at repo root (AMR.step,
+# AP242 from Onshape) parses cleanly (units = METRE, single shared origin) but
+# its global bounding box is only ~0.065 x 0.215 x 0.025 m — a thin sub-component
+# / bracket, NOT the full chassis. Those numbers are implausible as a robot
+# footprint, so we use a documented compact-AMR default below until the real
+# chassis dimensions are confirmed. Keep this the single source of truth; the
+# frontend mirrors it in api/types.ts (DEFAULT_FOOTPRINT).
+DEFAULT_FOOTPRINT_LENGTH_M = 0.70
+DEFAULT_FOOTPRINT_WIDTH_M = 0.50
+
+
+def default_footprint() -> dict:
+    """Fresh dict so each Robot gets its own footprint (no shared mutable default)."""
+    return {"length": DEFAULT_FOOTPRINT_LENGTH_M, "width": DEFAULT_FOOTPRINT_WIDTH_M}
+
+
 # Callbutton states
 CB_IDLE   = "idle"
 CB_READY  = "ready"    # este lado apertou, aguardando o par
@@ -50,6 +70,9 @@ class Robot:
     current_task: Optional[str] = None
     paused: bool = False
     last_seen: float = field(default_factory=time.time)
+    # Real-world footprint in metres {"length", "width"} — rendered to scale on
+    # the 2D map. Defaults to the shared compact-AMR placeholder (see above).
+    footprint: dict = field(default_factory=default_footprint)
 
     def to_dict(self) -> dict:
         return asdict(self)
