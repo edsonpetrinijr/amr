@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from "react"
-import { NavLink, Outlet } from "react-router"
+import React, { useCallback, useEffect, useRef, useState } from "react"
+import { NavLink, Outlet, useNavigate } from "react-router"
 import { LayoutDashboard, Map, Cpu, Wrench, ListChecks, Bell, Settings, OctagonX, Play, ShieldAlert } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/app/utils"
@@ -22,10 +22,32 @@ const navItems = [
 ]
 
 export function Layout() {
-  const { connected, robots, tasks } = useFleet()
+  const { connected, robots, tasks, alarms } = useFleet()
+  const navigate = useNavigate()
 
   const activeRobots = robots.filter(r => r.status !== 'idle' && r.status !== 'offline' && r.status !== 'charging').length
   const activeTasks  = tasks.filter(t => !['done','cancelled','failed'].includes(t.state)).length
+
+  // ── Relocalization-assist CTA ───────────────────────────────────────────────
+  // The backend latches one alarm per incident; we de-dupe by incident_id so an
+  // SSE reconnect / re-render can't re-toast the same incident.
+  const seenIncidents = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    for (const a of alarms) {
+      const p = a.payload
+      if (!p || p.action !== 'RELOCALIZE_ASSIST_V1') continue
+      if (seenIncidents.current.has(p.incident_id)) continue
+      seenIncidents.current.add(p.incident_id)
+      toast.error(`Robot ${p.robot_id} needs relocalization`, {
+        description: a.message || `Reason: ${p.reason}`,
+        duration: 12000,
+        action: {
+          label: 'Open Assist',
+          onClick: () => navigate(`/calibration/${p.robot_id}`),
+        },
+      })
+    }
+  }, [alarms, navigate])
 
   // ── Software STOP-ALL halt state ────────────────────────────────────────────
   const [halted, setHalted] = useState(false)
