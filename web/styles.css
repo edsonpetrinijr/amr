@@ -1,0 +1,6 @@
+@import "tailwindcss" source(none);
+@source "./**/*.{ts,tsx,html}";
+@import "tw-animate-css";
+
+html { font-size: 16px; }
+body { @apply font-sans; }

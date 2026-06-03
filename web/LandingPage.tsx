@@ -4,7 +4,7 @@ import {
   AlertTriangle, OctagonX, Hand, MapPin, Radio, MonitorPlay,
   Image as ImageIcon, Film,
 } from "lucide-react"
-import { BRAND, CONTACT_EMAIL, WHATSAPP_URL, PILOT_MAILTO } from "../landing/brand"
+import { BRAND, CONTACT_EMAIL, WHATSAPP_URL, PILOT_MAILTO } from "./brand"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Marketing landing page (v1) — standalone public route, no operator chrome.
