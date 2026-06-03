@@ -48,6 +48,7 @@ class RobotState:
     vy:          float = 0.0
     w:           float = 0.0
     battery:     float = 100.0        # percent
+    charging:    bool  = False        # SEER `charging` flag (best-effort)
     task_status: int   = 0
     target_id:   str   = ""
     connected:   bool  = False
@@ -96,6 +97,29 @@ def _recv_reply(sock: socket.socket) -> Optional[dict]:
         return json.loads(body)
     except (socket.timeout, socket.error, json.JSONDecodeError):
         return None
+
+
+def battery_pct_from_info(info: dict) -> Optional[float]:
+    """Extract battery percent (0–100) from a SEER status reply (request 1000).
+
+    SEER Robokit reports a FLAT `battery_level` float in 0.0–1.0 (not nested,
+    not a percentage), so we multiply by 100. Falls back to the legacy nested
+    `battery.percentage` (already 0–100) only when the real field is absent.
+    Returns None when battery is genuinely missing so the caller can KEEP the
+    last-known value — a present 0.0 yields 0.0, never None."""
+    if not isinstance(info, dict):
+        return None
+    lvl = info.get('battery_level')
+    if lvl is not None:
+        return max(0.0, min(100.0, float(lvl) * 100.0))
+    batt = info.get('battery')
+    if isinstance(batt, dict) and batt.get('percentage') is not None:
+        return max(0.0, min(100.0, float(batt['percentage'])))
+    if isinstance(batt, (int, float)):
+        # Bare number: SEER 0–1 level vs legacy 0–100 percent.
+        pct = float(batt) * 100.0 if batt <= 1.0 else float(batt)
+        return max(0.0, min(100.0, pct))
+    return None
 
 
 def _cmd(ip: str, port: int, req_id: int, msg_type: int, payload: dict) -> Optional[dict]:
@@ -250,11 +274,15 @@ class RobotConn:
                 updates.update(task_status=task.get('task_status', self.state.task_status),
                                 target_id=task.get('target_id', self.state.target_id) or '')
             if info:
-                batt = info.get('battery', {})
-                if isinstance(batt, dict):
-                    updates['battery'] = float(batt.get('percentage', self.state.battery))
-                elif isinstance(batt, (int, float)):
-                    updates['battery'] = float(batt)
+                # SEER reports a FLAT `battery_level` (0.0–1.0). Keep the
+                # previous percent when genuinely absent; a present 0.0 sticks.
+                pct = battery_pct_from_info(info)
+                if pct is not None:
+                    updates['battery'] = pct
+                # Opportunistic charging flag (kept if firmware omits it).
+                chg = info.get('charging')
+                if chg is not None:
+                    updates['charging'] = bool(chg)
                 # Robot model/name (best-effort: field name varies by firmware).
                 # Try the common SEER keys without crashing on absence.
                 model = (info.get('model')
