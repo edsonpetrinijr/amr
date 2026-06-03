@@ -1,8 +1,8 @@
 ﻿import React, { useState } from 'react'
-import { Truck, RotateCcw } from 'lucide-react'
+import { Truck, RotateCcw, Loader2 } from 'lucide-react'
 import { useFleet } from '../state/store'
-import { fleetApi } from '../api/fleet'
-import type { Station, Task } from '../api/types'
+import { fleetApi, FleetApiError } from '../api/fleet'
+import type { Station, Task, OpcuaTestResult } from '../api/types'
 
 const SUPPLIER = 'AP1'
 const CONSUMER = 'CB1'
@@ -132,7 +132,55 @@ export function Callbuttons() {
             Cancelar / Resetar
           </button>
         </div>
+
+        {/* OPC UA diagnostics — verify wiring before the plant floor */}
+        <div className="flex justify-center gap-3 mt-4">
+          {[supplier, consumer].filter((s): s is Station => !!s).map(s => (
+            <OpcuaTestButton key={s.id} station={s} />
+          ))}
+        </div>
       </div>
+    </div>
+  )
+}
+
+/** Compact per-station OPC UA test for the operator view. */
+function OpcuaTestButton({ station }: { station: Station }) {
+  const [testing, setTesting] = useState(false)
+  const [result, setResult] = useState<OpcuaTestResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleTest() {
+    setTesting(true)
+    setError(null)
+    setResult(null)
+    try {
+      setResult(await fleetApi.testOpcua({ station_id: station.id }))
+    } catch (e) {
+      setError(e instanceof FleetApiError ? e.message : 'Test failed')
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  const msg = error
+    ? <span className="text-[#ff7b72]">{error}</span>
+    : !result ? null
+    : !result.configured ? <span className="text-[#8b949e]">sem OPC UA</span>
+    : result.ok ? <span className="text-[#3fb950]">✅ {JSON.stringify(result.value)}</span>
+    : <span className="text-[#ff7b72]">❌ {result.error ?? 'falhou'}</span>
+
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <button
+        disabled={testing}
+        onClick={handleTest}
+        className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-[#30363d]
+          text-[#8b949e] hover:border-[#58a6ff]/50 hover:text-[#58a6ff] disabled:opacity-30 transition-colors">
+        {testing && <Loader2 className="w-3 h-3 animate-spin" />}
+        Testar {station.label}
+      </button>
+      {msg && <span className="text-[10px] font-mono">{msg}</span>}
     </div>
   )
 }
