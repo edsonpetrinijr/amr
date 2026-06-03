@@ -21,8 +21,8 @@ from backend.app import config, preflight
 
 def _stations(extra=None, drop=None):
     base = [
-        {"id": "AP1", "type": "ap", "label": "Almox", "x": 18, "y": 58, "seer_lm": "LM20"},
-        {"id": "CB1", "type": "callbutton", "label": "Posto 1", "x": 12, "y": 18, "seer_lm": "LM10"},
+        {"id": "AP1", "type": "ap", "label": "Almox", "x": 18, "y": 58, "seer_lm": "LM1"},
+        {"id": "CB1", "type": "callbutton", "label": "Posto 1", "x": 12, "y": 18, "seer_lm": "LM2"},
         {"id": "BASE", "type": "base", "label": "Base", "x": 50, "y": 92, "seer_lm": "LM1"},
     ]
     if drop:
@@ -55,7 +55,7 @@ def test_valid_config_is_ready():
 
 
 def test_duplicate_station_id_blocks():
-    dup = {"id": "CB1", "type": "callbutton", "label": "dup", "x": 1, "y": 1, "seer_lm": "LM10"}
+    dup = {"id": "CB1", "type": "callbutton", "label": "dup", "x": 1, "y": 1, "seer_lm": "LM2"}
     res = preflight.validate(_stations(extra=[dup]), PAIRS, sim_mode=True)
     assert not res.ok
     assert res.readiness == "blocked"
@@ -81,13 +81,13 @@ def test_missing_seer_lm_blocks_in_real_mode_only():
 
 
 def test_missing_map_landmark_blocks():
-    good_map = _FakeMap(["LM20", "LM10", "LM1"])
+    good_map = _FakeMap(["LM1", "LM2"])
     assert preflight.validate(_stations(), PAIRS, sim_mode=True, map_model=good_map).ok
 
-    bad_map = _FakeMap(["LM20"])  # CB1's LM10 absent
+    bad_map = _FakeMap(["LM1"])  # CB1's LM2 absent
     res = preflight.validate(_stations(), PAIRS, sim_mode=True, map_model=bad_map)
     assert not res.ok
-    assert any("LM10' not found in loaded map" in i for i in res.issues)
+    assert any("LM2' not found in loaded map" in i for i in res.issues)
 
 
 def test_real_repo_config_is_ready_in_sim_mode():

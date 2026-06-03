@@ -57,13 +57,22 @@ STATIONS = [
     # entry (placeholder ns=2;s=CallButton.CB1, no opcua_ret) was removed — it
     # silently shadowed this one in _load_stations and broke preflight uniqueness.
     # FLAG for Product: confirm the boolBTN012/022 node ids are the live buttons.
-    {"id": "CB1",   "type": "callbutton", "label": "Linha A · Posto 1","x": 12, "y": 18, "seer_lm": "LM10", "ap_id": None,  "opcua_node": "ns=1;s=boolBTN012", "opcua_ret": "ns=1;s=boolBTN022"},
-    {"id": "CB2",   "type": "callbutton", "label": "Linha A · Posto 2","x": 30, "y": 12, "seer_lm": "LM11", "ap_id": None,  "opcua_node": "ns=2;s=CallButton.CB2"},
-    {"id": "CB3",   "type": "callbutton", "label": "Linha B · Posto 1","x": 55, "y": 14, "seer_lm": "LM12", "ap_id": None,  "opcua_node": "ns=2;s=CallButton.CB3"},
-    {"id": "CB4",   "type": "callbutton", "label": "Linha B · Posto 2","x": 78, "y": 20, "seer_lm": "LM13", "ap_id": None,  "opcua_node": "ns=2;s=CallButton.CB4"},
-    {"id": "CB5",   "type": "callbutton", "label": "Linha C · Posto 1","x": 86, "y": 48, "seer_lm": "LM14", "ap_id": None,  "opcua_node": "ns=2;s=CallButton.CB5"},
-    {"id": "CB6",   "type": "callbutton", "label": "Linha C · Posto 2","x": 70, "y": 62, "seer_lm": "LM15", "ap_id": None,  "opcua_node": "ns=2;s=CallButton.CB6"},
-    {"id": "AP1",   "type": "ap",         "label": "Almox · Doca 1",  "x": 18, "y": 58, "seer_lm": "LM20", "ap_id": "AP1", "opcua_node": "ns=1;s=boolBTN011", "opcua_ret": "ns=1;s=boolBTN021"},
+    # The live map (1007.smap) only has landmarks LM1 + LM2; the pilot shuttles
+    # LM1 (Almox/AP1) ↔ LM2 (Linha/CB1), matching context/botoes_landmarks.py.
+    {"id": "CB1",   "type": "callbutton", "label": "Linha A · Posto 1","x": 12, "y": 18, "seer_lm": "LM2",  "ap_id": None,  "opcua_node": "ns=1;s=boolBTN012", "opcua_ret": "ns=1;s=boolBTN022"},
+    # CB2–CB6 are future expansion stations (Linhas A/B/C) that are NOT yet on the
+    # live map — it only has LM1 + LM2. Their old LM11–LM15 bindings were stale
+    # phantoms, so seer_lm is None until they're surveyed and added to the .smap.
+    {"id": "CB2",   "type": "callbutton", "label": "Linha A · Posto 2","x": 30, "y": 12, "seer_lm": None, "ap_id": None,  "opcua_node": "ns=2;s=CallButton.CB2"},
+    {"id": "CB3",   "type": "callbutton", "label": "Linha B · Posto 1","x": 55, "y": 14, "seer_lm": None, "ap_id": None,  "opcua_node": "ns=2;s=CallButton.CB3"},
+    {"id": "CB4",   "type": "callbutton", "label": "Linha B · Posto 2","x": 78, "y": 20, "seer_lm": None, "ap_id": None,  "opcua_node": "ns=2;s=CallButton.CB4"},
+    {"id": "CB5",   "type": "callbutton", "label": "Linha C · Posto 1","x": 86, "y": 48, "seer_lm": None, "ap_id": None,  "opcua_node": "ns=2;s=CallButton.CB5"},
+    {"id": "CB6",   "type": "callbutton", "label": "Linha C · Posto 2","x": 70, "y": 62, "seer_lm": None, "ap_id": None,  "opcua_node": "ns=2;s=CallButton.CB6"},
+    # AP1 is the pilot pair's supplier (Almox). LM1/LM2 are now plain SEER
+    # landmarks (LocationMark) — NOT action points — so AP1 navigates to
+    # landmark LM1 and carries no ap_id. (Was "LM20" + ap_id "AP1", both stale:
+    # the live map only has LM1 + LM2 and neither is an action point anymore.)
+    {"id": "AP1",   "type": "ap",         "label": "Almox · Doca 1",  "x": 18, "y": 58, "seer_lm": "LM1",  "ap_id": None,  "opcua_node": "ns=1;s=boolBTN011", "opcua_ret": "ns=1;s=boolBTN021"},
 ]
 
 # Pairs: supplier (quem faz a peça) → consumer (quem precisa da peça)

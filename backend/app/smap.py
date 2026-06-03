@@ -241,8 +241,13 @@ def load_map(path: str | Path) -> MapModel:
     ]
 
     # ── action points + landmarks ─────────────────────────────────────────────
-    # In this firmware the advancedPointList holds "LocationMark" entries that
-    # serve as both landmarks (localization) and navigation destinations (APs).
+    # advancedPointList holds two kinds of entries:
+    #   • LocationMark / LM* → SEER *landmarks* (localization references). These
+    #     are NOT navigable action points — the robot navigates to them by
+    #     landmark id (see context/botoes_landmarks.py: ir_para_landmark("LM1")).
+    #   • everything else     → action points (pickup/dropoff destinations).
+    # We classify each entry into exactly one bucket so landmarks never leak into
+    # the action-point set (which would wrongly satisfy ap_id validation).
     action_points: list[ActionPoint] = []
     landmarks: list[Landmark] = []
 
@@ -254,18 +259,23 @@ def load_map(path: str | Path) -> MapModel:
         instance_name = entry.get("instanceName", f"P{i+1}")
         class_name = entry.get("className", "")
 
-        # Every advancedPoint is also a reachable AP for navigation
-        action_points.append(ActionPoint(
-            id=instance_name,
-            x=px,
-            y=py,
-            theta=theta,
-            ap_type=class_name,
-            label=instance_name,
-        ))
-        # LocationMark entries are SEER landmarks
-        if "Location" in class_name or "Landmark" in class_name or instance_name.startswith("LM"):
+        is_landmark = (
+            "Location" in class_name
+            or "Landmark" in class_name
+            or instance_name.startswith("LM")
+        )
+        if is_landmark:
+            # Landmark only — do NOT also register it as an action point.
             landmarks.append(Landmark(id=instance_name, x=px, y=py))
+        else:
+            action_points.append(ActionPoint(
+                id=instance_name,
+                x=px,
+                y=py,
+                theta=theta,
+                ap_type=class_name,
+                label=instance_name,
+            ))
 
     # legacy landmarkList key
     for entry in data.get("landmarkList", []):
