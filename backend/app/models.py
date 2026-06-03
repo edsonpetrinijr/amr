@@ -30,14 +30,15 @@ T_RECOVERING = "recovering"
 # Top-down rectangle: length is along +theta (forward), width is perpendicular.
 # Rendered to scale on the 2D map (frontend MapCanvas) using map px/m.
 #
-# Founder-confirmed real chassis spec: L×W×H = 0.95 × 0.65 × 0.25 m
-# (950 × 650 × 250 mm, including the bumper strip). length is along +theta
-# (forward), width is perpendicular, height is for the 3D preview only.
+# Authoritative spec — SEER W3-600B, derived from GilmarCorreia/sim_models URDF:
+# lidar-to-lidar length, tray width, tray-raised height.
+# L×W×H = 0.85 × 0.65 × 0.30 m. length is along +theta (forward), width is
+# perpendicular, height is for the 3D preview only.
 # Keep this the single source of truth; the frontend mirrors it in
 # api/types.ts (DEFAULT_FOOTPRINT).
-DEFAULT_FOOTPRINT_LENGTH_M = 0.95
+DEFAULT_FOOTPRINT_LENGTH_M = 0.85
 DEFAULT_FOOTPRINT_WIDTH_M = 0.65
-DEFAULT_HEIGHT_M = 0.25
+DEFAULT_HEIGHT_M = 0.30
 
 
 def default_footprint() -> dict:
@@ -61,6 +62,8 @@ class Robot:
     y: float = 92.0
     theta: float = 0.0
     battery: float = 100.0
+    model: str = ""            # robot model string (e.g. "SIM-AMR"); filled by probe
+    connected: bool = False    # last known connection state (set by provider)
     status: str = IDLE
     nav: str = "idle"          # "moving" | "idle" — low-level motion state
     goal_x: Optional[float] = None
@@ -87,6 +90,7 @@ class Station:
     seer_lm: Optional[str] = None
     ap_id: Optional[str] = None
     opcua_node: Optional[str] = None
+    opcua_ret: Optional[str] = None
     cb_state: str = CB_IDLE
     cb_dir: Optional[str] = None   # "fwd" | "ret" | None
 

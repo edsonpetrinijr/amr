@@ -123,6 +123,61 @@ class SimProvider(Provider):
         ((ax,ay),(bx,by)) in world metres — same frame as est_pose."""
         self._walls = list(walls)
 
+    def _base_pose(self) -> tuple[float, float]:
+        base = next((s for s in config.STATIONS if s["type"] == "base"), None)
+        return (base["x"], base["y"]) if base else (50.0, 92.0)
+
+    # ── Devices: runtime fleet CRUD (mirrors persistence in store.py) ─────
+    def add_robot(self, cfg: dict) -> Robot:
+        """Build a Robot at base pose and register it + its per-robot sim state."""
+        rid = cfg.get("id") or cfg.get("name") or f"AMR-{len(self.robots) + 1}"
+        bx, by = self._base_pose()
+        r = Robot(id=rid, name=cfg.get("name") or rid, ip=cfg.get("ip", ""), x=bx, y=by)
+        r.connected = True
+        self.robots[rid] = r
+        # Replicate __init__'s per-robot state structures so tick() won't KeyError.
+        self._loc[rid] = _LocState(
+            est_x=r.x, est_y=r.y, est_theta=r.theta,
+            drift_dir=self._rng.uniform(0.0, 2 * math.pi),
+        )
+        return r
+
+    def update_robot(self, robot_id: str, ip: Optional[str] = None,
+                     name: Optional[str] = None) -> Optional[Robot]:
+        r = self.robots.get(robot_id)
+        if r is None:
+            return None
+        if ip is not None:
+            r.ip = ip
+        if name is not None:
+            r.name = name
+        return r
+
+    def remove_robot(self, robot_id: str) -> bool:
+        if robot_id not in self.robots:
+            return False
+        self.robots.pop(robot_id, None)
+        self._loc.pop(robot_id, None)
+        self._manual_vel.pop(robot_id, None)
+        self._force_unhealthy.pop(robot_id, None)
+        return True
+
+    def probe(self, robot_id: str) -> dict:
+        """Connectivity + info pull. Sim robots are always reachable."""
+        r = self.robots.get(robot_id)
+        if r is None:
+            return {"connected": False, "name": "", "model": "", "battery": None,
+                    "x": None, "y": None, "theta": None}
+        r.connected = True
+        return {
+            "connected": True,
+            "name": r.name,
+            "model": "SIM-AMR",
+            "battery": r.battery,
+            "x": r.x, "y": r.y, "theta": r.theta,
+        }
+
+
     def goto(self, robot_id: str, x: float, y: float, station: Optional[str]) -> None:
         r = self.robots[robot_id]
         r.goal_x, r.goal_y, r.goal_station = x, y, station
@@ -306,9 +361,12 @@ class SimProvider(Provider):
     def tick(self, dt: float) -> None:
         now = time.time()
         step = config.ROBOT_SPEED * dt
-        for r in self.robots.values():
+        for r in list(self.robots.values()):
             r.last_seen = now
-            loc = self._loc[r.id]
+            r.connected = not self._force_unhealthy.get(r.id, False)
+            loc = self._loc.get(r.id)
+            if loc is None:                 # robot removed mid-loop / state missing
+                continue
 
             navigating = r.nav == "moving" and not r.paused and r.goal_x is not None
             pose_err = math.hypot(loc.est_x - r.x, loc.est_y - r.y)

@@ -97,8 +97,21 @@ class Dispatcher:
                 seer_lm=s.get("seer_lm"),
                 ap_id=s.get("ap_id"),
                 opcua_node=s.get("opcua_node"),
+                opcua_ret=s.get("opcua_ret"),
             )
         return stations
+
+    def reload_stations(self) -> None:
+        """Rebuild self.stations from config.STATIONS after a config edit,
+        PRESERVING per-station runtime callbutton state (cb_state, cb_dir) for
+        stations that still exist. Tasks/locks are untouched."""
+        rebuilt = self._load_stations()
+        for sid, st in rebuilt.items():
+            prev = self.stations.get(sid)
+            if prev is not None:
+                st.cb_state = prev.cb_state
+                st.cb_dir = prev.cb_dir
+        self.stations = rebuilt
 
     def set_broadcast(self, fn: Callable[[dict], Awaitable[None]]) -> None:
         self._broadcast = fn
