@@ -211,6 +211,63 @@ def test_reconnect_resubscribes():
     asyncio.run(_test_reconnect_resubscribes())
 
 
+# ── probe_node diagnostics tests ──────────────────────────────────────────────
+
+async def _test_probe_node_reads_seeded_value() -> None:
+    """probe_node against the mock server returns ok=True with the seeded value."""
+    from backend.app.opcua import probe_node
+    _apply_fast_config()
+    server = MockOpcUaServer(ENDPOINT, {CB1: False})
+    await server.start()
+    try:
+        await server.set(CB1, True)
+        loop = asyncio.get_event_loop()
+        # probe_node is sync (spins its own loop) → run in an executor thread.
+        res = await loop.run_in_executor(None, lambda: probe_node(CB1, ENDPOINT, 4.0))
+        assert res["ok"] is True, f"probe failed: {res}"
+        assert res["value"] is True, f"unexpected value: {res}"
+        assert res["error"] is None
+        assert res["configured"] is True
+        assert res["endpoint"] == ENDPOINT
+    finally:
+        await server.stop()
+
+
+def _test_probe_node_empty_endpoint() -> None:
+    """probe_node with endpoint='' is configured=False, ok=False, no exception."""
+    from backend.app.opcua import probe_node
+    res = probe_node(CB1, "", 1.0)
+    assert res["ok"] is False, res
+    assert res["configured"] is False, res
+    assert res["value"] is None
+    assert res["endpoint"] is None
+    assert res["error"]
+
+
+def _test_probe_node_unreachable() -> None:
+    """probe_node against a bogus port returns ok=False with an error string."""
+    from backend.app.opcua import probe_node
+    bogus = "opc.tcp://127.0.0.1:1/none"
+    res = probe_node(CB1, bogus, 1.0)
+    assert res["ok"] is False, res
+    assert res["configured"] is True, res
+    assert res["value"] is None
+    assert isinstance(res["error"], str) and res["error"]
+
+
+# pytest entrypoints
+def test_probe_node_reads_seeded_value():
+    asyncio.run(_test_probe_node_reads_seeded_value())
+
+
+def test_probe_node_empty_endpoint():
+    _test_probe_node_empty_endpoint()
+
+
+def test_probe_node_unreachable():
+    _test_probe_node_unreachable()
+
+
 # ── Standalone runner (offline sandbox: no pytest) ─────────────────────────────
 if __name__ == "__main__":
     import logging

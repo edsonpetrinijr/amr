@@ -67,6 +67,76 @@ def build_node_map() -> dict[str, tuple[str, str]]:
     return node_map
 
 
+def _jsonable(value):
+    """Coerce an OPC UA read value to a JSON-serializable scalar."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float, str)) or value is None:
+        return value
+    try:
+        return str(value)
+    except Exception:
+        return None
+
+
+def probe_node(node_id: str, endpoint: Optional[str] = None,
+               timeout: float = 3.0) -> dict:
+    """Read a single OPC UA node value for diagnostics. NEVER raises.
+
+    Returns a dict:
+        {ok, value, error, configured, endpoint}
+
+      * ok        — True only if the value was read successfully.
+      * value     — JSON-serializable node value, else None.
+      * error     — None on success, else a clear message (with the exception).
+      * configured— whether an endpoint is configured/usable.
+      * endpoint  — the endpoint used (or None when unconfigured).
+
+    Called from a Flask request thread, so it spins up its own event loop.
+    """
+    if endpoint is None:
+        endpoint = config.OPCUA_ENDPOINT
+
+    if not HAS_ASYNCUA:
+        return {"ok": False, "value": None, "error": "asyncua not installed",
+                "configured": bool(endpoint), "endpoint": endpoint or None}
+
+    if not endpoint or not str(endpoint).strip():
+        return {"ok": False, "value": None,
+                "error": "no OPC UA endpoint configured",
+                "configured": False, "endpoint": None}
+
+    endpoint = str(endpoint).strip()
+
+    async def _read() -> dict:
+        async def _connect_and_read():
+            async with Client(endpoint) as client:
+                node = client.get_node(node_id)
+                return await node.read_value()
+        value = await asyncio.wait_for(_connect_and_read(), timeout=timeout)
+        return {"ok": True, "value": _jsonable(value), "error": None,
+                "configured": True, "endpoint": endpoint}
+
+    loop = asyncio.new_event_loop()
+    try:
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(_read())
+    except asyncio.TimeoutError:
+        return {"ok": False, "value": None,
+                "error": f"timeout after {timeout}s connecting to {endpoint}",
+                "configured": True, "endpoint": endpoint}
+    except Exception as e:  # noqa: BLE001 — diagnostics must never raise
+        return {"ok": False, "value": None,
+                "error": f"{type(e).__name__}: {e}",
+                "configured": True, "endpoint": endpoint}
+    finally:
+        try:
+            loop.close()
+        except Exception:
+            pass
+        asyncio.set_event_loop(None)
+
+
 class _SubscriptionHandler:
     """asyncua subscription handler: fires dispatcher on rising-edge True, debounced."""
 
@@ -154,6 +224,17 @@ class OpcUaCallbuttonDriver:
         t = self._thread
         if t and t.is_alive():
             t.join(timeout=timeout)
+        self._thread = None
+
+    def restart(self, timeout: float = 5.0) -> None:
+        """Hot-rebuild the driver: stop the monitor thread, then start again so it
+        re-reads config.STATIONS (via build_node_map) and resubscribes with the
+        edited OPC UA nodes. Safe to call when never started / asyncua missing /
+        no endpoint — start() no-ops gracefully in those cases."""
+        self.stop(timeout=timeout)
+        self._stop.clear()
+        self.start()
+        log.info("OpcUaCallbuttonDriver restarted (node map rebuilt)")
 
     # ── Private ──────────────────────────────────────────────────────────────
 
