@@ -57,6 +57,83 @@ class SeerProvider:
 
         log.info("SeerProvider: %d robots started", len(self.robots))
 
+    # ── Devices: runtime fleet CRUD (mirrors SimProvider contract) ────────────
+
+    def _base_pose(self) -> tuple[float, float]:
+        base = next((s for s in config.STATIONS if s['type'] == 'base'), None)
+        return (base['x'], base['y']) if base else (0.0, 0.0)
+
+    def add_robot(self, cfg: dict) -> Robot:
+        """Register a new robot: build+start a RobotConn and a Robot at base pose."""
+        rid = cfg.get('id') or cfg.get('name') or f"AMR-{len(self.robots) + 1}"
+        ip = cfg.get('ip', '')
+        bx, by = self._base_pose()
+
+        conn = RobotConn(rid, ip)
+        conn.start()
+        self._conns[rid] = conn
+
+        r = Robot(
+            id=rid, name=cfg.get('name') or rid, ip=ip,
+            x=bx, y=by, status=OFFLINE,
+        )
+        self.robots[rid] = r
+        log.info("[%s] robot added → %s", rid, ip)
+        return r
+
+    def update_robot(self, robot_id: str, ip: Optional[str] = None,
+                     name: Optional[str] = None) -> Optional[Robot]:
+        """Update a robot. If the IP changed, hot-reload the RobotConn (tear down
+        the old polling thread/socket and start a fresh connection)."""
+        r = self.robots.get(robot_id)
+        if r is None:
+            return None
+        if ip is not None and ip != r.ip:
+            old = self._conns.pop(robot_id, None)
+            if old is not None:
+                old.shutdown()
+                old.join()
+            conn = RobotConn(robot_id, ip)
+            conn.start()
+            self._conns[robot_id] = conn
+            r.ip = ip
+            r.connected = False
+            log.info("[%s] connection hot-reloaded → %s", robot_id, ip)
+        if name is not None:
+            r.name = name
+        return r
+
+    def remove_robot(self, robot_id: str) -> bool:
+        """Stop the RobotConn polling thread and drop the robot."""
+        if robot_id not in self.robots:
+            return False
+        conn = self._conns.pop(robot_id, None)
+        if conn is not None:
+            conn.shutdown()
+            conn.join()
+        self.robots.pop(robot_id, None)
+        log.info("[%s] robot removed", robot_id)
+        return True
+
+    def probe(self, robot_id: str) -> dict:
+        """Pull connectivity + auto-pulled info from the live RobotConn snapshot.
+        Surfaces whether the IP is reachable and the fields the poll thread reads."""
+        conn = self._conns.get(robot_id)
+        if conn is None:
+            return {"connected": False, "name": "", "model": "", "battery": None,
+                    "x": None, "y": None, "theta": None}
+        s = conn.state.snapshot()
+        r = self.robots.get(robot_id)
+        return {
+            "connected": bool(s.get("connected", False)),
+            "name": r.name if r is not None else "",
+            "model": s.get("model", ""),
+            "battery": s.get("battery"),
+            "x": s.get("x"),
+            "y": s.get("y"),
+            "theta": s.get("theta"),
+        }
+
     # ── Provider interface ────────────────────────────────────────────────────
 
     def goto(self, robot_id: str, x: float, y: float, station: Optional[str]) -> None:
@@ -116,6 +193,8 @@ class SeerProvider:
             r.last_seen = s.get('last_seen', r.last_seen)
 
             connected = s.get('connected', False)
+            r.connected = bool(connected)
+            r.model = s.get('model', r.model) or r.model
             ts = s.get('task_status', 0)
             nav = r.nav
 

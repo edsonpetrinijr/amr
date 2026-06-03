@@ -51,6 +51,10 @@ class RobotState:
     task_status: int   = 0
     target_id:   str   = ""
     connected:   bool  = False
+    # Robot model/name as reported by robot_status_info_req. Best-effort: SEER
+    # firmwares vary on the exact field name (vehicle_id / model / version).
+    # TODO(real HW): confirm the actual reply key on the unit.
+    model:       str   = ""
     # Opportunistic diagnostics — only set if the SEER firmware exposes them.
     # TODO(real HW): confirm exact field names against the unit's API replies.
     confidence:  Optional[float] = None   # localization confidence / reloc score
@@ -118,14 +122,46 @@ class RobotConn:
         self._stop    = threading.Event()
         self._seq     = 0
         self._last_laser = 0.0    # monotonic-ish gate for laser fetch (~2 Hz)
-        self._thread  = threading.Thread(target=self._poll_loop, daemon=True, name=f"poll-{robot_id}")
+        self._sock: Optional[socket.socket] = None   # persistent state socket
+        self._thread: Optional[threading.Thread] = None
 
     def start(self) -> None:
+        """Start the polling thread. Idempotent: a no-op if already running."""
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(
+            target=self._poll_loop, daemon=True, name=f"poll-{self.robot_id}")
         self._thread.start()
         log.info("[%s] polling thread started → %s", self.robot_id, self.ip)
 
-    def stop(self) -> None:
+    def shutdown(self) -> None:
+        """Signal the poll thread to exit and tear down the persistent socket.
+
+        Idempotent and safe to call repeatedly (add/update/remove lifecycle).
+        Distinct from stop(), which halts motion via zero velocity."""
         self._stop.set()
+        self.close()
+
+    def close(self) -> None:
+        """Close the persistent state socket so a blocking recv unblocks and
+        the poll thread can exit promptly. Best-effort; never raises."""
+        sock = self._sock
+        if sock is not None:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except Exception:
+                pass
+            try:
+                sock.close()
+            except Exception:
+                pass
+            self._sock = None
+
+    def join(self, timeout: float = 3.0) -> None:
+        t = self._thread
+        if t is not None and t.is_alive():
+            t.join(timeout=timeout)
 
     def _next_seq(self) -> int:
         self._seq = (self._seq + 1) & 0xFFFF
@@ -140,6 +176,7 @@ class RobotConn:
                 self.state.update(connected=False)
                 self._stop.wait(RECONNECT_WAIT)
                 continue
+            self._sock = sock
             self.state.update(connected=True)
             log.info("[%s] state socket connected", self.robot_id)
             try:
@@ -155,6 +192,7 @@ class RobotConn:
                     sock.close()
                 except Exception:
                     pass
+                self._sock = None
                 self.state.update(connected=False)
             if not self._stop.is_set():
                 log.info("[%s] reconnecting in %.0fs…", self.robot_id, RECONNECT_WAIT)
@@ -217,6 +255,14 @@ class RobotConn:
                     updates['battery'] = float(batt.get('percentage', self.state.battery))
                 elif isinstance(batt, (int, float)):
                     updates['battery'] = float(batt)
+                # Robot model/name (best-effort: field name varies by firmware).
+                # Try the common SEER keys without crashing on absence.
+                model = (info.get('model')
+                         or info.get('vehicle_id')
+                         or info.get('vehicle_model')
+                         or info.get('version'))
+                if isinstance(model, (str, int, float)) and str(model):
+                    updates['model'] = str(model)
 
             self.state.update(**updates)
 
