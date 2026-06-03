@@ -64,6 +64,9 @@ class Provider:
     robots: dict[str, Robot]
 
     def goto(self, robot_id: str, x: float, y: float, station: Optional[str]) -> None: ...
+    def goto_landmark(self, robot_id: str, lm_id: str, x: float, y: float) -> bool:
+        """Navigate directly to a map landmark by id. Default no-op → False."""
+        return False
     def stop(self, robot_id: str) -> None: ...
     def send_velocity(self, robot_id: str, vx: float, vy: float, w: float) -> bool:
         """Open-loop manual velocity command (operator jog). Default no-op."""
@@ -183,6 +186,15 @@ class SimProvider(Provider):
         r.goal_x, r.goal_y, r.goal_station = x, y, station
         r.nav = "moving"
         r.paused = False
+
+    def goto_landmark(self, robot_id: str, lm_id: str, x: float, y: float) -> bool:
+        r = self.robots.get(robot_id)
+        if r is None:
+            return False
+        r.goal_x, r.goal_y, r.goal_station = x, y, lm_id
+        r.nav = "moving"
+        r.paused = False
+        return True
 
     def stop(self, robot_id: str) -> None:
         r = self.robots[robot_id]

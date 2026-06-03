@@ -151,6 +151,18 @@ class SeerProvider:
         r.paused = False
         conn.goto_target(lm)
 
+    def goto_landmark(self, robot_id: str, lm_id: str, x: float, y: float) -> bool:
+        """Navigate directly to a map landmark by id (real SEER go-to-target).
+        x,y are only used to seed the UI marker pose."""
+        conn = self._conns.get(robot_id)
+        if conn is None:
+            return False
+        r = self.robots[robot_id]
+        r.goal_x, r.goal_y, r.goal_station = x, y, lm_id
+        r.nav = 'moving'
+        r.paused = False
+        return conn.goto_target(lm_id)
+
     def stop(self, robot_id: str) -> None:
         conn = self._conns.get(robot_id)
         if conn is None:

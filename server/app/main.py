@@ -517,6 +517,38 @@ def get_robot_laser(robot_id: str):
     return jsonify(provider.laser(robot_id))
 
 
+@app.route("/robots/<robot_id>/navigate", methods=["POST", "OPTIONS"])
+def navigate_robot(robot_id: str):
+    """Navigate a robot directly to a map landmark. Body: {landmark_id}.
+    Refuses (409) if the robot has an active task, no map is loaded; (404) for
+    unknown robot/landmark; (400) for missing landmark_id."""
+    if request.method == "OPTIONS":
+        return "", 204
+    if not _dispatcher:
+        return jsonify({"error": "Dispatcher not ready"}), 503
+    body = request.get_json(force=True, silent=True) or {}
+    landmark_id = str(body.get("landmark_id", "")).strip()
+    if not landmark_id:
+        return jsonify({"error": "landmark_id required"}), 400
+    provider = _dispatcher.provider
+    if robot_id not in provider.robots:
+        return jsonify({"error": "Robot not found"}), 404
+    if _map_model is None:
+        return jsonify({"error": "No map loaded"}), 409
+    lm = next((m for m in _map_model.landmarks if m.id == landmark_id), None)
+    if lm is None:
+        return jsonify({"error": "Unknown landmark"}), 404
+    robot = provider.robots[robot_id]
+    if getattr(robot, "current_task", None):
+        return jsonify({"error": "robot has an active task — cancel it first"}), 409
+    ok = provider.goto_landmark(robot_id, landmark_id, lm.x, lm.y)
+    _broadcast(alarm_msg("info", f"{robot_id} → {landmark_id}", robot_id))
+    return jsonify({
+        "ok": ok, "robot_id": robot_id, "landmark_id": landmark_id,
+        "x": lm.x, "y": lm.y,
+    })
+
+
 # ── Devices & callbuttons: robot CRUD + OPC UA config/diagnostics ─────────────
 
 def _find_robot_cfg(robot_id: str):
