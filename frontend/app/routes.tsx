@@ -7,8 +7,12 @@ import { Calibration } from "./pages/Calibration"
 import { Tasks } from "./pages/Tasks"
 import { Callbuttons } from "./pages/Callbuttons"
 import { SettingsPage } from "./pages/Settings"
+import { LandingPage } from "./pages/LandingPage"
 
 export const router = createBrowserRouter([
+  // Public marketing page — intentionally OUTSIDE the operator Layout so it
+  // renders full-bleed with no sidebar/chrome (it's for prospects, not operators).
+  { path: "/landing", Component: LandingPage },
   {
     path: "/",
     Component: Layout,
