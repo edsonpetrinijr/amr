@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Settings, Save, AlertTriangle, CheckCircle, Wifi, WifiOff } from 'lucide-react'
 import { useFleet } from '../state/store'
+import { fleetApi, FleetApiError, type MapInfo } from '../api/fleet'
 import { Button } from '../components/ui/button'
 import { Badge } from '../components/ui/badge'
 
@@ -41,6 +42,61 @@ function Toggle({ value, onChange, disabled }: { value: boolean; onChange: (v: b
       <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform
         ${value ? 'translate-x-6' : 'translate-x-1'}`} />
     </button>
+  )
+}
+
+function MapSelector() {
+  const [maps, setMaps] = useState<MapInfo[]>([])
+  const [selected, setSelected] = useState<string>('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    fleetApi.getMaps()
+      .then(list => {
+        if (!alive) return
+        setMaps(list)
+        setSelected(list.find(m => m.current)?.name ?? list[0]?.name ?? '')
+      })
+      .catch(e => { if (alive) setError(e instanceof Error ? e.message : 'Failed to load maps') })
+    return () => { alive = false }
+  }, [])
+
+  async function onChange(name: string) {
+    const prev = selected
+    setSelected(name)      // optimistic
+    setBusy(true)
+    setError(null)
+    try {
+      await fleetApi.selectMap(name)
+      // SSE `map` message refreshes the canvas; just mark this one current.
+      setMaps(ms => ms.map(m => ({ ...m, current: m.name === name })))
+    } catch (e) {
+      setSelected(prev)    // revert on failure
+      setError(e instanceof FleetApiError ? e.message : (e instanceof Error ? e.message : 'Failed to switch map'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <select
+        className="w-56 bg-[#0d1117] border border-[#30363d] rounded px-3 py-1.5 text-xs font-mono text-[#58a6ff]
+          focus:outline-none focus:border-[#58a6ff] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+        value={selected}
+        disabled={busy || maps.length === 0}
+        onChange={e => onChange(e.target.value)}
+      >
+        {maps.length === 0 && <option value="">No maps available</option>}
+        {maps.map(m => (
+          <option key={m.name} value={m.name} className="bg-[#0d1117] text-[#c9d1d9]">{m.name}</option>
+        ))}
+      </select>
+      {busy && <span className="text-xs text-[#8b949e]">Switching…</span>}
+      {error && <span className="text-xs text-red-400">{error}</span>}
+    </div>
   )
 }
 
@@ -212,8 +268,8 @@ export function SettingsPage() {
           <Row label="Active facility" sub="Multi-facility support coming in a future release">
             <Badge variant="outline" className="font-mono">Piracicaba</Badge>
           </Row>
-          <Row label="Map file" sub=".smap loaded at backend startup via SMAP_PATH env var">
-            <span className="text-xs font-mono text-[#8b949e]">InnovationBox.smap</span>
+          <Row label="Map file" sub=".smap loaded by the backend — switch the active map at runtime">
+            <MapSelector />
           </Row>
         </Section>
 

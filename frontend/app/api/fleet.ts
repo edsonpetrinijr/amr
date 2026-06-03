@@ -11,6 +11,13 @@ import type {
 
 const BASE: string = import.meta.env?.VITE_FLEET_URL ?? 'http://localhost:8765'
 
+/** One entry from GET /maps — an available .smap and whether it's the active one. */
+export type MapInfo = { name: string; current: boolean }
+
+/** Result of POST /maps/select. `map` is the freshly-loaded MapModel (the canvas
+ *  refreshes via the broadcast SSE `map` message, so callers rarely read it). */
+export type SelectMapResult = { ok: boolean; name: string; map: unknown }
+
 /** Configured backend base URL — for callers that need raw fetch (e.g. /setdo). */
 export function fleetBaseUrl(): string {
   return BASE
@@ -109,6 +116,14 @@ function _qs(opts?: { since?: number; limit?: number }): string {
 export const fleetApi = {
   health:          ()                             => _json('/health'),
   getMap:          ()                             => _json('/map'),
+
+  /** GET /maps — list available .smap files and which one is currently loaded. */
+  getMaps:         ()                             => _json('/maps') as Promise<MapInfo[]>,
+
+  /** POST /maps/select — switch the active map. Backend broadcasts a `map` SSE
+   *  message on success, so the canvas refreshes automatically. */
+  selectMap: (name: string) =>
+    _json('/maps/select', { method: 'POST', body: JSON.stringify({ name }) }) as Promise<SelectMapResult>,
   getStations:     ()                             => _json('/stations'),
   getRobots:       ()                             => _json('/robots'),
 
