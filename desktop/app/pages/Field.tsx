@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState, Suspense } from 'react'
-import { Map, Radar, Box } from 'lucide-react'
+import React, { useEffect, useRef, useState, Suspense, lazy } from 'react'
+import { Map, Radar, Box, LayoutGrid } from 'lucide-react'
 import { useFleet } from '../state/store'
 import { fleetApi } from '../api/fleet'
 import { MapCanvas } from '../components/MapCanvas'
@@ -8,8 +8,9 @@ import { Button } from '../components/ui/button'
 import type { Robot, Station } from '../api/types'
 
 // Lazy-loaded so three.js / R3F stay out of the initial bundle; only fetched when
-// the 3D panel is first toggled on.
-const RobotPreview3D = React.lazy(() => import('../components/RobotPreview3D'))
+// the 3D map is first rendered.
+const RobotPreview3D = lazy(() => import('../components/RobotPreview3D'))
+const MapCanvas3D    = lazy(() => import('../components/MapCanvas3D'))
 
 const STATUS_VARIANT: Record<string, 'success' | 'destructive' | 'default' | 'secondary' | 'outline'> = {
   idle:           'outline',
@@ -145,14 +146,18 @@ export function Field() {
   const [selectedRobot, setSelectedRobot]     = useState<Robot | null>(null)
   const [selectedStation, setSelectedStation] = useState<Station | null>(null)
 
+  // ── View mode: '3d' (default) or '2d' ────────────────────────────────────────
+  const [viewMode, setViewMode] = useState<'3d' | '2d'>('3d')
+
   // ── Laser layer (dedicated PULL endpoint, polled ~2.5 Hz while ON) ──────────
   const [laserOn, setLaserOn]       = useState(false)
-  const [show3D, setShow3D]         = useState(false)
+  const [show3DPanel, setShow3DPanel] = useState(false)
   const [laserBeams, setLaserBeams] = useState<[number, number][]>([])
+
   // Refs keep the poller reading the latest selection/robots without re-arming
   // the interval on every 10 Hz SSE world frame.
-  const robotsRef = useRef(robots);            robotsRef.current = robots
-  const selectedRef = useRef(selectedRobot);   selectedRef.current = selectedRobot
+  const robotsRef   = useRef(robots);           robotsRef.current   = robots
+  const selectedRef = useRef(selectedRobot);    selectedRef.current = selectedRobot
 
   useEffect(() => {
     if (!laserOn) { setLaserBeams([]); return }
@@ -191,17 +196,46 @@ export function Field() {
         <div className={`w-2 h-2 rounded-full ml-2 ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
         <span className="text-xs text-[#8b949e]">{connected ? 'Live' : 'Disconnected'}</span>
         <div className="ml-auto flex items-center gap-2 text-xs text-[#8b949e]">
+          {/* 2D / 3D toggle */}
+          <div className="flex items-center rounded border border-[#30363d] overflow-hidden">
+            <button
+              onClick={() => setViewMode('2d')}
+              className={`flex items-center gap-1 px-2 py-1 transition-colors ${
+                viewMode === '2d'
+                  ? 'bg-[#21262d] text-[#e6edf3]'
+                  : 'text-[#8b949e] hover:bg-[#161b22]'
+              }`}
+            >
+              <LayoutGrid className="w-3 h-3" />
+              2D
+            </button>
+            <button
+              onClick={() => setViewMode('3d')}
+              className={`flex items-center gap-1 px-2 py-1 transition-colors border-l border-[#30363d] ${
+                viewMode === '3d'
+                  ? 'bg-[#21262d] text-[#58a6ff]'
+                  : 'text-[#8b949e] hover:bg-[#161b22]'
+              }`}
+            >
+              <Box className="w-3 h-3" />
+              3D
+            </button>
+          </div>
+
+          {/* Laser toggle (only useful in 2D mode but kept available) */}
           <button onClick={() => setLaserOn(v => !v)}
             className={`flex items-center gap-1.5 px-2 py-1 rounded border transition-colors
               ${laserOn ? 'border-[#f0883e] text-[#f0883e] bg-[#f0883e]/10' : 'border-[#30363d] hover:bg-[#161b22]'}`}>
             <Radar className="w-3.5 h-3.5" />
             Laser
           </button>
-          <button onClick={() => setShow3D(v => !v)}
+
+          {/* Side 3D preview panel toggle */}
+          <button onClick={() => setShow3DPanel(v => !v)}
             className={`flex items-center gap-1.5 px-2 py-1 rounded border transition-colors
-              ${show3D ? 'border-[#58a6ff] text-[#58a6ff] bg-[#58a6ff]/10' : 'border-[#30363d] hover:bg-[#161b22]'}`}>
+              ${show3DPanel ? 'border-[#58a6ff] text-[#58a6ff] bg-[#58a6ff]/10' : 'border-[#30363d] hover:bg-[#161b22]'}`}>
             <Box className="w-3.5 h-3.5" />
-            3D
+            3D Panel
           </button>
           <span>{robots.length} robots</span>
           <span>·</span>
@@ -213,13 +247,32 @@ export function Field() {
       <div className="flex-1 flex overflow-hidden">
         <div className="flex-1 overflow-hidden">
           {map ? (
-            <MapCanvas map={map} robots={robots} stations={stations}
-              laser={laserOn ? { beams: laserBeams, ts: 0 } : undefined}
-              selectedId={selectedId}
-              onClickRobot={selectRobot}
-              onClickAP={selectStation}
-              className="w-full h-full"
-            />
+            viewMode === '3d' ? (
+              <Suspense fallback={
+                <div className="w-full h-full flex items-center justify-center text-[#8b949e] text-sm">
+                  Loading 3D scene…
+                </div>
+              }>
+                <MapCanvas3D
+                  map={map}
+                  robots={robots}
+                  stations={stations}
+                  robotsRef={robotsRef}
+                  selectedId={selectedId}
+                  onClickRobot={selectRobot}
+                  onClickStation={selectStation}
+                  className="w-full h-full"
+                />
+              </Suspense>
+            ) : (
+              <MapCanvas map={map} robots={robots} stations={stations}
+                laser={laserOn ? { beams: laserBeams, ts: 0 } : undefined}
+                selectedId={selectedId}
+                onClickRobot={selectRobot}
+                onClickAP={selectStation}
+                className="w-full h-full"
+              />
+            )
           ) : (
             <div className="h-full flex items-center justify-center text-[#8b949e] text-sm">
               {connected ? 'Loading map…' : 'Connecting to backend…'}
@@ -228,11 +281,8 @@ export function Field() {
         </div>
         {selectedRobot   && <RobotPanel   robot={selectedRobot}   stations={stations} onClose={() => setSelectedRobot(null)} />}
         {selectedStation && <StationPanel station={selectedStation} robots={robots}   onClose={() => setSelectedStation(null)} />}
-        {/* Opt-in 3D preview. Conditional mount = the R3F canvas (and three.js)
-            never load while the panel is off. Pose is read from robotsRef inside
-            the panel (ref-based, ≤10 Hz), so it stays off the SSE re-render path.
-            Falls back to the first robot when none is selected. */}
-        {show3D && (selectedRobot?.id ?? robots[0]?.id) && (
+        {/* Opt-in 3D side preview panel. Conditional mount = R3F canvas never loads while off. */}
+        {show3DPanel && (selectedRobot?.id ?? robots[0]?.id) && (
           <Suspense fallback={<div className="w-80 flex-shrink-0 bg-[#161b22] border-l border-[#30363d]" />}>
             <RobotPreview3D robotId={(selectedRobot?.id ?? robots[0]?.id)!} robotsRef={robotsRef}
               className="w-80 flex-shrink-0 border-l border-[#30363d]" />

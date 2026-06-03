@@ -175,8 +175,9 @@ function RobotPreview3D({ robotId, robotsRef, className }: RobotPreview3DProps) 
       >
         <color attach="background" args={['#0d1117']} />
         {/* Minimal lighting: ambient fill + one directional key. */}
-        <ambientLight intensity={0.6} />
-        <directionalLight position={[3, 5, 2]} intensity={1.1} />
+        <ambientLight intensity={2.5} />
+        <directionalLight position={[0, 10, 0]} intensity={2.0} />
+        <directionalLight position={[5, 8, 5]} intensity={1.0} />
 
         <PoseDriver robotId={robotId} robotsRef={robotsRef}>
           {/* Real chassis inside the pose group; placeholder is the graceful fallback. */}
