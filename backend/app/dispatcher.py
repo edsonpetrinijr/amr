@@ -20,6 +20,7 @@ import logging
 import math
 import threading
 import time
+import uuid
 from typing import Optional, Callable, Awaitable
 
 from . import config
@@ -59,6 +60,11 @@ class Dispatcher:
         self._cooldown: dict[str, float] = {}
         # Robots we've already raised an offline alarm for (one per transition).
         self._offline_alarmed: set[str] = set()
+        # Localization-recovery incident latch: robot_id → active incident_id.
+        # While a robot stays in one localization incident we emit the actionable
+        # relocalize-assist alarm exactly once; the latch clears when the robot
+        # returns to a healthy, confident, OK-localization state.
+        self._loc_incidents: dict[str, str] = {}
 
         # Optional soak-run telemetry state machine (owns cycle_id/step).
         self.soak = None
@@ -458,6 +464,10 @@ class Dispatcher:
             if robot.status == OFFLINE and not robot.current_task and self._robot_healthy(robot):
                 robot.status = IDLE
                 self._offline_alarmed.discard(robot.id)
+            # Clear the localization-incident latch once the robot recovers, so a
+            # future loss fires a fresh alarm with a new incident_id.
+            if robot.id in self._loc_incidents and self._loc_recovered(robot.id):
+                self._loc_incidents.pop(robot.id, None)
 
         for task in list(self._tasks.values()):
             if task.state not in self._RECOVERABLE:
@@ -513,6 +523,7 @@ class Dispatcher:
         asyncio.ensure_future(self._emit(task_update_msg(task, "recovering")))
         asyncio.ensure_future(self._emit(
             alarm_msg("warn", f"{task.id} recovering: {reason}", robot.id)))
+        self._emit_loc_incident_alarm(task, robot, reason)
         log.warning("recovery: %s on robot %s — reason=%s", task.id, robot.id, reason)
 
         if task.retries < config.MAX_TASK_RETRIES:
@@ -537,6 +548,83 @@ class Dispatcher:
                           robot.id)))
             log.error("recovery: %s FAILED after %d retries — reason=%s",
                       task.id, task.retries, reason)
+
+    # ── Localization-recovery alarm (actionable, latched per incident) ─────────
+
+    # Recovery reasons that are localization-related and warrant a relocalize
+    # assist alarm. robot_offline / battery are deliberately excluded.
+    _LOC_ALARM_REASONS = {"nav_failed": "NAV_FAILED", "stuck": "STUCK"}
+
+    def _raw_state_safe(self, robot_id: str) -> dict:
+        get_raw = getattr(self.provider, "raw_state", None)
+        if get_raw is None:
+            return {}
+        try:
+            return get_raw(robot_id) or {}
+        except Exception:
+            return {}
+
+    def _loc_recovered(self, robot_id: str) -> bool:
+        """True when the robot is back to a healthy, OK-localization, confident
+        navigating state — the signal to clear its incident latch."""
+        rs = self._raw_state_safe(robot_id)
+        if not rs.get("connected", True):
+            return False
+        if rs.get("loc_mode") not in (None, "ok"):
+            return False
+        conf = rs.get("confidence")
+        if conf is not None and conf < config.LOC_LOST_CONFIDENCE_THRESHOLD:
+            return False
+        if rs.get("task_status") == 4:        # still nav-failed
+            return False
+        return True
+
+    def _emit_loc_incident_alarm(self, task: Task, robot: Robot, reason: str) -> None:
+        """Emit ONE structured, actionable alarm when a robot enters recovery for
+        a localization-related reason. Latched per incident: while the robot stays
+        in the same incident we do not re-emit; the latch clears in _check_recovery
+        once the robot recovers (then a future loss gets a NEW incident_id)."""
+        enum_reason = self._LOC_ALARM_REASONS.get(reason)
+        if enum_reason is None:
+            return                            # not a localization recovery
+        if robot.id in self._loc_incidents:
+            return                            # already alarmed this incident
+
+        rs = self._raw_state_safe(robot.id)
+        conf = rs.get("confidence")
+        # A stuck robot that is also low-confidence/lost is best surfaced as a
+        # localization confidence problem rather than a generic stall.
+        if reason == "stuck" and (
+            (conf is not None and conf < config.LOC_LOST_CONFIDENCE_THRESHOLD)
+            or rs.get("loc_mode") in ("lost", "mislocalized")
+        ):
+            enum_reason = "LOW_CONFIDENCE"
+
+        incident_id = f"loc-{uuid.uuid4().hex[:12]}"
+        self._loc_incidents[robot.id] = incident_id
+        payload = {
+            "robot_id": robot.id,
+            "task_id": task.id,
+            "reason": enum_reason,
+            "last_pose": {
+                "x": rs.get("x"),
+                "y": rs.get("y"),
+                "theta": rs.get("theta"),
+                "confidence": conf,
+            },
+            "action": "RELOCALIZE_ASSIST_V1",
+            "suggestions_url": f"/api/relocalize/suggestions?robot_id={robot.id}",
+            "timestamp": time.time(),
+            "incident_id": incident_id,
+        }
+        asyncio.ensure_future(self._emit(alarm_msg(
+            "warn",
+            f"{robot.id} needs relocalization ({enum_reason}) — task {task.id}",
+            robot.id,
+            payload=payload,
+        )))
+        log.warning("loc incident %s: robot=%s task=%s reason=%s",
+                    incident_id, robot.id, task.id, enum_reason)
 
     # ── Battery management ────────────────────────────────────────────────────
 

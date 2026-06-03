@@ -123,5 +123,12 @@ def callbutton_msg(station: Station) -> dict:
     return {"type": "callbutton", "station": station.to_dict()}
 
 
-def alarm_msg(level: str, message: str, robot_id: Optional[str] = None) -> dict:
-    return {"type": "alarm", "level": level, "message": message, "robot_id": robot_id, "ts": time.time()}
+def alarm_msg(level: str, message: str, robot_id: Optional[str] = None,
+              payload: Optional[dict] = None) -> dict:
+    """SSE alarm. `payload` carries optional structured data (e.g. recovery
+    relocalization assist) and is omitted entirely when None so existing
+    consumers that only read level/message/robot_id keep working unchanged."""
+    msg = {"type": "alarm", "level": level, "message": message, "robot_id": robot_id, "ts": time.time()}
+    if payload is not None:
+        msg["payload"] = payload
+    return msg
