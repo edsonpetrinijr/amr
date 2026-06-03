@@ -1,13 +1,13 @@
 import React, { useState } from 'react'
 import { useParams, Link } from 'react-router'
-import { Wrench, AlertTriangle, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, RotateCw, RotateCcw, Square } from 'lucide-react'
+import { Wrench, AlertTriangle, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, RotateCw, RotateCcw, Square, Crosshair, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useFleet } from '../state/store'
 import { fleetApi, FleetApiError, fleetBaseUrl } from '../api/fleet'
 import { MapCanvas } from '../components/MapCanvas'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
-import type { Robot } from '../api/types'
+import type { Robot, RelocalizeSuggestion, RelocalizeSuggestionsResponse } from '../api/types'
 
 // ── Jog panel ─────────────────────────────────────────────────────────────────
 
@@ -161,6 +161,10 @@ function RelocalizePanel({ robot }: { robot: Robot }) {
   const [sending, setSending] = useState(false)
   const [result,  setResult]  = useState<string | null>(null)
 
+  // ── Relocalization assist ───────────────────────────────────────────────────
+  const [assistLoading, setAssistLoading] = useState(false)
+  const [assist, setAssist] = useState<RelocalizeSuggestionsResponse | null>(null)
+
   async function handleRelocalize() {
     setSending(true)
     setResult(null)
@@ -169,6 +173,34 @@ function RelocalizePanel({ robot }: { robot: Robot }) {
       setResult(r.ok ? '✓ Relocalization sent' : '✗ Failed')
     } catch { setResult('✗ Error') }
     finally { setSending(false) }
+  }
+
+  async function handleGetSuggestions() {
+    setAssistLoading(true)
+    try {
+      const res = await fleetApi.getRelocalizeSuggestions({ robotId: robot.id })
+      setAssist(res)
+    } catch (e) {
+      setAssist(null)
+      if (e instanceof FleetApiError) {
+        if (e.status === 409)      toast.error('No map loaded', { description: 'Load a map before requesting suggestions.' })
+        else if (e.status === 404) toast.error('Robot pose unavailable', { description: 'The system does not know where this robot is yet.' })
+        else if (e.status === 400) toast.error('Missing parameters', { description: e.message })
+        else                       toast.error('Could not get suggestions', { description: e.message })
+      } else {
+        toast.error('Could not get suggestions', { description: 'Backend not reachable' })
+      }
+    } finally {
+      setAssistLoading(false)
+    }
+  }
+
+  // Fill the pose fields from a landmark. Keep current θ when the landmark has none.
+  function applySuggestion(s: RelocalizeSuggestion) {
+    setX(s.x.toFixed(2))
+    setY(s.y.toFixed(2))
+    if (s.theta != null) setTheta((s.theta * 180 / Math.PI).toFixed(1))
+    setResult(null)
   }
 
   return (
@@ -190,6 +222,50 @@ function RelocalizePanel({ robot }: { robot: Robot }) {
         {sending ? 'Sending…' : 'Set Pose'}
       </Button>
       {result && <p className="text-xs mt-2 text-[#3fb950]">{result}</p>}
+
+      {/* ── Relocalization Assist ───────────────────────────────────────────── */}
+      <div className="mt-4 pt-3 border-t border-[#30363d]">
+        <div className="flex items-center justify-between mb-2">
+          <h4 className="text-xs text-[#8b949e] font-medium uppercase tracking-wide flex items-center gap-1.5">
+            <Crosshair className="w-3.5 h-3.5" /> Relocalization Assist
+          </h4>
+          <Button variant="outline" size="sm" disabled={assistLoading} onClick={handleGetSuggestions}>
+            {assistLoading ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : null}
+            {assistLoading ? 'Finding…' : 'Get suggestions'}
+          </Button>
+        </div>
+        <p className="text-[#6e7681] text-xs mb-2">
+          Suggests the nearest map landmarks to where the system thinks {robot.id} is. Pick one to pre-fill the pose.
+        </p>
+
+        {assist && (
+          <p className="text-[10px] text-[#6e7681] font-mono mb-2">
+            pose used: x={assist.pose_used.x.toFixed(2)} y={assist.pose_used.y.toFixed(2)}
+            {assist.pose_used.confidence != null ? ` · conf ${(assist.pose_used.confidence * 100).toFixed(0)}%` : ''}
+            {' '}· {assist.source === 'robot_state' ? 'from robot' : 'explicit'}
+          </p>
+        )}
+
+        {assist && assist.suggestions.length === 0 && (
+          <p className="text-xs text-[#8b949e] py-2">No landmarks found.</p>
+        )}
+
+        {assist && assist.suggestions.length > 0 && (
+          <ul className="space-y-1">
+            {assist.suggestions.map(s => (
+              <li key={s.lm_id}
+                className="flex items-center gap-2 text-xs bg-[#0d1117] border border-[#30363d] rounded px-2 py-1.5">
+                <span className="font-mono text-[#c9d1d9] truncate flex-1">{s.name}</span>
+                <span className="text-[#8b949e] font-mono shrink-0">{s.dist_m.toFixed(1)} m</span>
+                <Button variant="outline" size="sm" className="shrink-0 h-6 px-2"
+                  onClick={() => applySuggestion(s)}>
+                  Use
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
 
       {/* Mini map with landmark click */}
       {map && (
