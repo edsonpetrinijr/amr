@@ -22,6 +22,9 @@ export default tseslint.config(
       'context/**',
       '**/*.config.*',
       '**/*.cjs',
+      // Phase 2 3D preview: ready but held out until three deps install (npm
+      // registry was unreachable). See docs/phase2-3d-preview.md.
+      'frontend/app/components/RobotPreview3D.tsx',
     ],
   },
   js.configs.recommended,
