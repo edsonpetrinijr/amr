@@ -229,10 +229,13 @@ export function Field() {
         {selectedRobot   && <RobotPanel   robot={selectedRobot}   stations={stations} onClose={() => setSelectedRobot(null)} />}
         {selectedStation && <StationPanel station={selectedStation} robots={robots}   onClose={() => setSelectedStation(null)} />}
         {/* Opt-in 3D preview. Conditional mount = the R3F canvas (and three.js)
-            never load while the panel is off. Falls back to the first robot. */}
-        {show3D && (selectedRobot ?? robots[0]) && (
+            never load while the panel is off. Pose is read from robotsRef inside
+            the panel (ref-based, ≤10 Hz), so it stays off the SSE re-render path.
+            Falls back to the first robot when none is selected. */}
+        {show3D && (selectedRobot?.id ?? robots[0]?.id) && (
           <Suspense fallback={<div className="w-80 flex-shrink-0 bg-[#161b22] border-l border-[#30363d]" />}>
-            <RobotPreview3D robot={(selectedRobot ?? robots[0])!} className="w-80 flex-shrink-0 border-l border-[#30363d]" />
+            <RobotPreview3D robotId={(selectedRobot?.id ?? robots[0]?.id)!} robotsRef={robotsRef}
+              className="w-80 flex-shrink-0 border-l border-[#30363d]" />
           </Suspense>
         )}
       </div>

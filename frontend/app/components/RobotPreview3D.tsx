@@ -3,7 +3,7 @@
 //
 // PLACEHOLDER STATE (honest): the only CAD we received was `AMR.step`, which on
 // inspection is a ~0.065×0.090×0.029 m sub-component (a bracket/fastener
-// sub-assembly, ~3.7k verts), NOT the full W3-600B chassis. Its GLB conversion
+// sub-assembly, ~3.7k verts), NOT the full robot chassis. Its GLB conversion
 // was therefore an orphan and has been removed. Until a proper full-assembly STEP
 // export lands we render a TO-SCALE procedural box sized from the robot's
 // footprint (length × width × height in metres) so the preview is dimensionally

@@ -30,15 +30,14 @@ T_RECOVERING = "recovering"
 # Top-down rectangle: length is along +theta (forward), width is perpendicular.
 # Rendered to scale on the 2D map (frontend MapCanvas) using map px/m.
 #
-# Authoritative spec — SEER W3-600B, derived from GilmarCorreia/sim_models URDF:
-# lidar-to-lidar length, tray width, tray-raised height.
-# L×W×H = 0.85 × 0.65 × 0.30 m. length is along +theta (forward), width is
-# perpendicular, height is for the 3D preview only.
+# L×W×H = 0.95 × 0.65 × 0.25 m (founder-confirmed spec, with bumper strip).
+# length is along +theta (forward), width is perpendicular, height is for the
+# 3D preview only.
 # Keep this the single source of truth; the frontend mirrors it in
 # api/types.ts (DEFAULT_FOOTPRINT).
-DEFAULT_FOOTPRINT_LENGTH_M = 0.85
+DEFAULT_FOOTPRINT_LENGTH_M = 0.95
 DEFAULT_FOOTPRINT_WIDTH_M = 0.65
-DEFAULT_HEIGHT_M = 0.30
+DEFAULT_HEIGHT_M = 0.25
 
 
 def default_footprint() -> dict:

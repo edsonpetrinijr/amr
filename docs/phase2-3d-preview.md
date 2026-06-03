@@ -8,18 +8,17 @@ from the 2D `MapCanvas`. **Active as of Phase 2.**
 - **To-scale procedural preview (dimensionally honest).** The only CAD we
   received was `AMR.step`. On inspection (trimesh) it is a
   **~0.065 × 0.090 × 0.029 m sub-component** — a bracket/fastener sub-assembly of
-  ~3.7k vertices / ~4.5k faces across 10 parts — **not** the full W3-600B
+  ~3.7k vertices / ~4.5k faces across 10 parts — **not** the full robot
   chassis. We do **not** fake a robot from it. Instead `RobotPreview3D` renders a
   **to-scale procedural rounded box** sized from the robot's real footprint
-  (**0.85 L × 0.65 W × 0.30 H m**, the SEER W3-600B dimensions from `types.ts`
+  (**0.95 L × 0.65 W × 0.25 H m**, the founder-confirmed spec from `types.ts`
   `DEFAULT_FOOTPRINT`/`DEFAULT_HEIGHT_M`; status-coloured, with a forward heading
   cone), sitting on the floor (Y up, length +X, width +Z) so it reads at true size
   against the 0.25 m grid. A **real full-assembly model is pending a proper STEP
-  export from the founder**. The converted orphan `public/AMR.glb` (122 KB, from
-  the sub-component `AMR.step`) was a sub-part — never loaded — and has been
-  **removed from the repo** to avoid a misleading unused asset (it also derived
-  from a GPL-3.0 dimension source). Do not re-add a mesh until a license-clean,
-  full-assembly model is cleared (see TIMELINE 2026-06-03).
+  export from the founder**. The converted orphan `public/AMR.glb` (from the
+  sub-component `AMR.step`) was only a sub-part — never loaded — and has been
+  **removed from the repo** to avoid a misleading unused asset. Do not re-add a
+  mesh until a full-assembly model is cleared.
 - **Deps:** `three`, `@react-three/fiber@8` (React 18), `@react-three/drei@9`,
   `@types/three`.
 - **Isolation:** `RobotPreview3D` is `React.lazy`-loaded, so three.js is split
