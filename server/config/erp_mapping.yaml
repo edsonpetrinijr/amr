@@ -1,0 +1,33 @@
+# ERP "Reposição" → station mapping (Phase 1, Sim PoC).
+#
+# An ORDER record is resolved to a (pickup, dropoff) station pair by checking,
+# in order, its `cell`, then `pou`, then `storage_loc` against the sections
+# below; the first match wins. If nothing matches, `default` is used. A station
+# id with NO mapping → the order is parked as `blocked_unmapped` (never moved).
+#
+# In Sim ONLY two stations carry a SEER landmark and can move a robot:
+#   CB-ALMOX → LM1 (Almox · Doca 1)     CB1 → LM2 (Linha A · Posto 1)
+# So every mapping below resolves to that single shuttle: CB-ALMOX <-> CB1.
+
+# ENVIO = where the loaded AMR departs from; RECEBIMENTO = where an empty rack
+# is returned to. Both are CB-ALMOX (LM1) in the Sim PoC.
+envio_station: CB-ALMOX
+recebimento_station: CB-ALMOX
+
+# Fallback when no cell/pou/storage_loc section matches. Real C ILC orders carry
+# varied pou values, so the default keeps the end-to-end path working in Sim.
+default:
+  pickup: CB-ALMOX
+  dropoff: CB1
+
+# cell → pickup/dropoff. The AMR test trigger is cell "C ILC".
+cell:
+  C ILC:
+    pickup: CB-ALMOX
+    dropoff: CB1
+
+# pou → pickup/dropoff (none specific in the Sim PoC; default covers it).
+pou: {}
+
+# storage_loc → pickup/dropoff (none specific in the Sim PoC).
+storage_loc: {}

@@ -46,6 +46,7 @@ from . import config, db, telemetry
 from . import store
 from . import opcua as opcua
 from .dispatcher import Dispatcher
+from .erp import ErpService, load_mapping
 from .models import world_snapshot, alarm_msg, task_update_msg, IDLE, OFFLINE, CHARGING
 from .opcua import OpcUaCallbuttonDriver
 from .provider import SimProvider
@@ -78,6 +79,7 @@ _dispatcher: Optional[Dispatcher] = None
 _map_model  = None
 _map_name: Optional[str] = None   # filename of the live map, e.g. "1007.smap"
 _opcua_driver = None   # OpcUaCallbuttonDriver instance (set in _startup)
+_erp_service: Optional[ErpService] = None   # ERP "Reposição" poller + actions
 
 # Guards the rare map swap (mutate _map_model/_map_name + re-feed sim walls)
 # against the running dispatcher/sim loop. NOT on the 10 Hz SSE hot path.
@@ -274,7 +276,7 @@ def _telemetry_sampler_loop() -> None:
 
 
 def _startup() -> None:
-    global _dispatcher, _map_model, _opcua_driver
+    global _dispatcher, _map_model, _opcua_driver, _erp_service
 
     db.init()
 
@@ -332,8 +334,21 @@ def _startup() -> None:
         atexit.register(_shutdown_telemetry)
         log.info("Soak telemetry capture active (run_id=%s)", config.RUN_ID)
 
+    # ── ERP "Reposição" replenishment (Phase 1) ─────────────────────────────
+    # Construct the service BEFORE the OPC UA driver so we can hand the driver
+    # the action handler (confirm-delivery / request-empty button presses).
+    erp_mapping = load_mapping(config.ERP_MAPPING_PATH)
+    _erp_service = ErpService(_dispatcher, _sync_broadcast, erp_mapping)
+    threading.Thread(target=_erp_service.poll_loop, daemon=True, name="erp-poller").start()
+    log.info("ERP poller started (feed=%s, interval=%.1fs)",
+             config.ERP_FEED_PATH, config.ERP_POLL_INTERVAL_S)
+
     # OPC UA callbutton driver (starts only if OPCUA_ENDPOINT is set and asyncua present)
-    opcua_driver = OpcUaCallbuttonDriver(_dispatcher)
+    try:
+        opcua_driver = OpcUaCallbuttonDriver(_dispatcher, action_handler=_erp_service.handle_action)
+    except TypeError:
+        # Integration engineer's action_handler kwarg not landed yet — degrade gracefully.
+        opcua_driver = OpcUaCallbuttonDriver(_dispatcher)
     opcua_driver.start()
     _opcua_driver = opcua_driver
 
@@ -700,6 +715,43 @@ def cancel_task(task_id: str):
     if not ok:
         return jsonify({"error": "Task not found or already terminal"}), 404
     return jsonify({"ok": True, "id": task_id})
+
+
+# ── ERP "Reposição" (replenishment) — Phase 1 ───────────────────────────────
+
+@app.route("/erp/orders")
+def erp_orders():
+    """List ERP orders (both order and empty_return lanes) + ENVIO readiness."""
+    if not _erp_service:
+        return jsonify({"orders": [], "amr_ready": False,
+                        "envio_station": config.ERP_ENVIO_STATION})
+    return jsonify({
+        "orders": _erp_service.list_orders(200),
+        "amr_ready": _erp_service.amr_ready(),
+        "envio_station": config.ERP_ENVIO_STATION,
+    })
+
+
+@app.route("/erp/confirm-delivery", methods=["POST", "OPTIONS"])
+def erp_confirm_delivery():
+    """Dispatch the FIFO-oldest ready order to its AMR (simulates the button)."""
+    if request.method == "OPTIONS":
+        return "", 204
+    if not _erp_service:
+        return jsonify({"ok": False, "error": "erp not ready"}), 503
+    res = _erp_service.confirm_delivery()
+    return jsonify(res), (200 if res.get("ok") else 409)
+
+
+@app.route("/erp/request-empty", methods=["POST", "OPTIONS"])
+def erp_request_empty():
+    """Dispatch an AMR from the POU back to RECEBIMENTO to fetch an empty rack."""
+    if request.method == "OPTIONS":
+        return "", 204
+    if not _erp_service:
+        return jsonify({"ok": False, "error": "erp not ready"}), 503
+    res = _erp_service.request_empty()
+    return jsonify(res), (200 if res.get("ok") else 409)
 
 
 @app.route("/button/<station_id>", methods=["POST"])

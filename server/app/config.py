@@ -45,6 +45,64 @@ if _opcua_raw:
         print(f"[config] ignoring invalid OPCUA_NODE_MAP: {_e}")
         OPCUA_NODE_MAP = {}
 
+# ── OPC UA action bindings (ERP buttons — contract with integration engineer) ─
+# node-id string → action name ("confirm-delivery" | "request-empty"). The OPC
+# UA driver calls ErpService.handle_action(<name>) on a rising edge of one of
+# these nodes. Empty in sim; env-overridable JSON like OPCUA_NODE_MAP. Example:
+#   OPCUA_ACTION_MAP='{"ns=1;s=boolBTN030": "confirm-delivery"}'
+OPCUA_ACTION_MAP: dict[str, str] = {}
+_opcua_action_raw = os.getenv("OPCUA_ACTION_MAP", "").strip()
+if _opcua_action_raw:
+    try:
+        OPCUA_ACTION_MAP = {str(k): str(v) for k, v in _json.loads(_opcua_action_raw).items()}
+    except Exception as _e:  # noqa: BLE001 — bad config must not crash the backend
+        print(f"[config] ignoring invalid OPCUA_ACTION_MAP: {_e}")
+        OPCUA_ACTION_MAP = {}
+
+# ── ERP "Reposição" (replenishment) feed — Phase 1 ──────────────────────────
+# A rolling ~375k-line fixed-width snapshot refreshed ~15 min. We NEVER open the
+# source in place — always copy it locally (ERP_WORK_COPY) and parse the copy.
+ERP_FEED_PATH    = os.getenv("ERP_FEED_PATH", r"C:\Users\junioeg\robotics\robotics1\TRANVR2.TXT")
+ERP_WORK_COPY    = os.getenv("ERP_WORK_COPY", os.path.join(os.path.dirname(__file__), "..", "erp_feed_copy.txt"))
+ERP_MAPPING_PATH = os.getenv("ERP_MAPPING_PATH", os.path.join(os.path.dirname(__file__), "..", "config", "erp_mapping.yaml"))
+ERP_POLL_INTERVAL_S = float(os.getenv("ERP_POLL_INTERVAL_S", "10.0"))
+# Cap NEW dispatchable order rows created per poll cycle so a test run never
+# turns 28k matching rows into 28k jobs in one go.
+ERP_MAX_DISPATCH = int(os.getenv("ERP_MAX_DISPATCH", "5"))
+# Stations (Sim PoC). ENVIO = where the AMR loads/leaves; RECEBIMENTO = where an
+# empty rack returns. Both carry a SEER landmark in Sim (CB-ALMOX → LM1).
+ERP_ENVIO_STATION       = os.getenv("ERP_ENVIO_STATION", "CB-ALMOX")
+ERP_RECEBIMENTO_STATION = os.getenv("ERP_RECEBIMENTO_STATION", "CB-ALMOX")
+
+# AMR trigger filter — the named TRIMMED field must equal `value`. Swapping to
+# {"field":"observation","value":"AMR"} later is a ONE-LINE config change.
+ERP_AMR_FILTER: dict = {"field": "cell", "value": "C ILC"}
+_erp_filter_raw = os.getenv("ERP_AMR_FILTER", "").strip()
+if _erp_filter_raw:
+    try:
+        _f = _json.loads(_erp_filter_raw)
+        ERP_AMR_FILTER = {"field": str(_f["field"]), "value": str(_f["value"])}
+    except Exception as _e:  # noqa: BLE001
+        print(f"[config] ignoring invalid ERP_AMR_FILTER: {_e}")
+
+# Record-type classification sets (CONFIGURABLE). ORDER also matches any
+# record_type whose 2-char prefix is in ERP_ORDER_PREFIXES (I5*/N5* variants).
+def _erp_set(env_name: str, default: set[str]) -> set[str]:
+    raw = os.getenv(env_name, "").strip()
+    if not raw:
+        return set(default)
+    try:
+        return {str(x).strip() for x in _json.loads(raw)}
+    except Exception as _e:  # noqa: BLE001
+        print(f"[config] ignoring invalid {env_name}: {_e}")
+        return set(default)
+
+ERP_ORDER_TYPES       = _erp_set("ERP_ORDER_TYPES",
+                                 {"IKS", "I5F", "N5A", "N5F", "NFM", "NKS", "NS3", "I5U", "I5M", "I5A"})
+ERP_ORDER_PREFIXES    = _erp_set("ERP_ORDER_PREFIXES", {"I5", "N5"})
+ERP_FULFILLMENT_TYPES = _erp_set("ERP_FULFILLMENT_TYPES", {"I6A", "N6A", "N6K", "N6L", "I6F"})
+ERP_CANCELLATION_TYPES = _erp_set("ERP_CANCELLATION_TYPES", {"I7Q", "N02", "N7A", "N7V"})
+
 # ── Stations ────────────────────────────────────────────────────────────────
 # type: "callbutton" | "base" | "ap"
 #   callbutton — physical button; an operator calls a robot here
