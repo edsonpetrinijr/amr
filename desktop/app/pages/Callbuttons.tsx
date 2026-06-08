@@ -1,5 +1,6 @@
 ﻿import React, { useState } from 'react'
 import { Truck, RotateCcw, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { useFleet } from '../state/store'
 import { fleetApi, FleetApiError } from '../api/fleet'
 import type { Station, Task, OpcuaTestResult } from '../api/types'
@@ -92,14 +93,26 @@ export function Callbuttons() {
 
   async function handlePress(id: string, dir: 'fwd' | 'ret') {
     setPressing(id + dir)
-    try { await fleetApi.buttonPress(id, dir) } catch {}
-    finally { setPressing(null) }
+    try {
+      await fleetApi.buttonPress(id, dir)
+    } catch (e) {
+      const detail = e instanceof FleetApiError ? e.message : 'Backend inacessível'
+      toast.error('Falha ao enviar a chamada', { description: detail })
+    } finally {
+      setPressing(null)
+    }
   }
 
   async function handleReset() {
     setResetting(true)
-    try { await fleetApi.resetPair(SUPPLIER) } catch {}
-    finally { setResetting(false) }
+    try {
+      await fleetApi.resetPair(SUPPLIER)
+    } catch (e) {
+      const detail = e instanceof FleetApiError ? e.message : 'Backend inacessível'
+      toast.error('Falha ao cancelar/resetar', { description: detail })
+    } finally {
+      setResetting(false)
+    }
   }
 
   return (
@@ -107,39 +120,49 @@ export function Callbuttons() {
       {/* Header */}
       <div className="border-b border-[#30363d] px-6 py-3 flex items-center gap-3 flex-shrink-0">
         <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-400' : 'bg-red-400 animate-pulse'}`} />
-        <span className="text-sm font-semibold text-[#e6edf3]">Call Buttons</span>
-        <span className="text-xs text-[#484f58] ml-1">— via OPC UA quando SIM_MODE=false</span>
+        <span className="text-sm font-semibold text-[#e6edf3]">Botões de Chamada</span>
+        <span className="text-xs text-[#484f58] ml-1">— via OPC UA quando em modo hardware</span>
       </div>
 
-      {/* Rows */}
-      <div className="flex-1 flex flex-col justify-center gap-4 p-8">
-        <DirectionRow dir="fwd" label={FWD_LABEL}
-          supplier={supplier} consumer={consumer} task={fwdTask}
-          onPress={handlePress} pressing={pressing} />
-
-        <DirectionRow dir="ret" label={RET_LABEL}
-          supplier={supplier} consumer={consumer} task={retTask}
-          onPress={handlePress} pressing={pressing} />
-
-        {/* Reset */}
-        <div className="flex justify-center mt-2">
-          <button
-            disabled={!anyActive || resetting}
-            onClick={handleReset}
-            className="flex items-center gap-2 text-xs px-4 py-2 rounded-lg border border-[#30363d]
-              text-[#8b949e] hover:border-red-500/50 hover:text-red-400 disabled:opacity-30 transition-colors">
-            <RotateCcw className="w-3.5 h-3.5" />
-            Cancelar / Resetar
-          </button>
+      {/* Guard: required callbutton stations must exist in the loaded map. */}
+      {(!supplier || !consumer) ? (
+        <div className="flex-1 flex items-center justify-center p-8">
+          <span className="text-sm text-[#8b949e] text-center max-w-md leading-relaxed">
+            Estações de botão de chamada não encontradas no mapa atual
+            ({SUPPLIER} / {CONSUMER}). Verifique se o mapa correto está carregado.
+          </span>
         </div>
+      ) : (
+        /* Rows */
+        <div className="flex-1 flex flex-col justify-center gap-4 p-8">
+          <DirectionRow dir="fwd" label={FWD_LABEL}
+            supplier={supplier} consumer={consumer} task={fwdTask}
+            onPress={handlePress} pressing={pressing} />
 
-        {/* OPC UA diagnostics — verify wiring before the plant floor */}
-        <div className="flex justify-center gap-3 mt-4">
-          {[supplier, consumer].filter((s): s is Station => !!s).map(s => (
-            <OpcuaTestButton key={s.id} station={s} />
-          ))}
+          <DirectionRow dir="ret" label={RET_LABEL}
+            supplier={supplier} consumer={consumer} task={retTask}
+            onPress={handlePress} pressing={pressing} />
+
+          {/* Reset */}
+          <div className="flex justify-center mt-2">
+            <button
+              disabled={!anyActive || resetting}
+              onClick={handleReset}
+              className="flex items-center gap-2 text-xs px-4 py-2 rounded-lg border border-[#30363d]
+                text-[#8b949e] hover:border-red-500/50 hover:text-red-400 disabled:opacity-30 transition-colors">
+              <RotateCcw className="w-3.5 h-3.5" />
+              Cancelar / Resetar
+            </button>
+          </div>
+
+          {/* OPC UA diagnostics — verify wiring before the plant floor */}
+          <div className="flex justify-center gap-3 mt-4">
+            {[supplier, consumer].filter((s): s is Station => !!s).map(s => (
+              <OpcuaTestButton key={s.id} station={s} />
+            ))}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }
@@ -155,9 +178,12 @@ function OpcuaTestButton({ station }: { station: Station }) {
     setError(null)
     setResult(null)
     try {
-      setResult(await fleetApi.testOpcua({ station_id: station.id }))
+      const res = await fleetApi.testOpcua({ station_id: station.id })
+      // Raw read value kept for debugging only — never shown to the operator.
+      console.debug('opcua test', station.id, res.node, res.value)
+      setResult(res)
     } catch (e) {
-      setError(e instanceof FleetApiError ? e.message : 'Test failed')
+      setError(e instanceof FleetApiError ? e.message : 'Falha no teste')
     } finally {
       setTesting(false)
     }
@@ -167,7 +193,7 @@ function OpcuaTestButton({ station }: { station: Station }) {
     ? <span className="text-[#ff7b72]">{error}</span>
     : !result ? null
     : !result.configured ? <span className="text-[#8b949e]">sem OPC UA</span>
-    : result.ok ? <span className="text-[#3fb950]">✅ {JSON.stringify(result.value)}</span>
+    : result.ok ? <span className="text-[#3fb950]">✅ Leitura OK</span>
     : <span className="text-[#ff7b72]">❌ {result.error ?? 'falhou'}</span>
 
   return (
