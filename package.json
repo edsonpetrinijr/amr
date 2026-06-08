@@ -81,8 +81,8 @@
     "vite-plugin-electron-renderer": "^0.14.0"
   },
   "build": {
-    "appId": "com.behavex.app",
-    "productName": "BehaveX",
+    "appId": "com.caterpillar.fleet",
+    "productName": "Caterpillar Inc. Fleet",
     "mac": {
       "category": "public.app-category.developer-tools",
       "target": "dmg"

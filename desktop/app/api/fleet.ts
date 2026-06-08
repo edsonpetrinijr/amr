@@ -201,10 +201,7 @@ export const fleetApi = {
   resetPair: (stationId: string) =>
     _json(`/reset/${stationId}`, { method: 'POST' }),
 
-  callbuttonPress: (stationId: string)           =>
-    _json(`/callbutton/${stationId}`, { method: 'POST' }),
-
-  /** POST /callbutton/<id> — simulate a physical callbutton press from the UI so
+  /** POST /callbutton/<id>— simulate a physical callbutton press from the UI so
    *  an operator can test the transport flow. Surfaces 4xx via FleetApiError. */
   pressCallbutton: (stationId: string) =>
     _jsonOrError(`/callbutton/${stationId}`, { method: 'POST' }) as Promise<CallbuttonPressResult>,

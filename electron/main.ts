@@ -22,7 +22,9 @@ function createWindow() {
     height: 900,
     minWidth: 1000,
     minHeight: 700,
-    titleBarStyle: 'hiddenInset',
+    // hiddenInset is mac-only (inset traffic lights). On Windows/Linux keep the
+    // standard frame so the title bar / controls render correctly.
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     backgroundColor: '#0d1117',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),

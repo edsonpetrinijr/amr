@@ -12,13 +12,13 @@ import {
 } from "@/app/components/ui/alert-dialog"
 
 const navItems = [
-  { icon: LayoutDashboard, label: "Dashboard",    path: "/" },
-  { icon: Map,             label: "Field View",   path: "/field" },
-  { icon: ListChecks,      label: "Tasks",        path: "/tasks" },
-  { icon: Bell,            label: "Call Buttons", path: "/callbuttons" },
-  { icon: Cpu,             label: "Devices",      path: "/devices" },
-  { icon: Wrench,          label: "Calibration",  path: "/calibration" },
-  { icon: Settings,        label: "Settings",     path: "/settings" },
+  { icon: LayoutDashboard, label: "Painel",          path: "/" },
+  { icon: Map,             label: "Visão de Campo",   path: "/field" },
+  { icon: ListChecks,      label: "Tarefas",          path: "/tasks" },
+  { icon: Bell,            label: "Botões de Chamada", path: "/callbuttons" },
+  { icon: Cpu,             label: "Dispositivos",     path: "/devices" },
+  { icon: Wrench,          label: "Calibração",       path: "/calibration" },
+  { icon: Settings,        label: "Configurações",    path: "/settings" },
 ]
 
 export function Layout() {
@@ -38,11 +38,11 @@ export function Layout() {
       if (!p || p.action !== 'RELOCALIZE_ASSIST_V1') continue
       if (seenIncidents.current.has(p.incident_id)) continue
       seenIncidents.current.add(p.incident_id)
-      toast.error(`Robot ${p.robot_id} needs relocalization`, {
-        description: a.message || `Reason: ${p.reason}`,
+      toast.error(`Robô ${p.robot_id} precisa de relocalização`, {
+        description: a.message || `Motivo: ${p.reason}`,
         duration: 12000,
         action: {
-          label: 'Open Assist',
+          label: 'Abrir Assistente',
           onClick: () => navigate(`/calibration/${p.robot_id}`),
         },
       })
@@ -72,11 +72,11 @@ export function Layout() {
     try {
       const res = await fleetApi.stopAll()
       setHalted(res.halted)
-      toast.warning('FLEET STOP-ALL engaged', {
-        description: `${res.cancelled.length} task(s) cancelled · software stop only`,
+      toast.warning('PARADA GERAL acionada', {
+        description: `${res.cancelled.length} tarefa(s) cancelada(s) · apenas parada por software`,
       })
     } catch {
-      toast.error('STOP-ALL failed', { description: 'Backend not reachable' })
+      toast.error('Falha na PARADA GERAL', { description: 'Backend inacessível' })
     } finally {
       setBusy(false)
     }
@@ -87,9 +87,9 @@ export function Layout() {
     try {
       const res = await fleetApi.resume()
       setHalted(res.halted)
-      toast.success('Fleet resumed — auto-dispatch re-enabled')
+      toast.success('Frota retomada — despacho automático reativado')
     } catch {
-      toast.error('Resume failed', { description: 'Backend not reachable' })
+      toast.error('Falha ao retomar', { description: 'Backend inacessível' })
     } finally {
       setBusy(false)
     }
@@ -103,7 +103,7 @@ export function Layout() {
         <div className="h-8 shrink-0" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties} />
         <div className="h-14 border-b border-[#30363d] flex items-center px-4">
           <div className="w-6 h-6 bg-[#58a6ff] rounded-sm mr-3 flex items-center justify-center shrink-0">
-            <span className="text-white text-xs font-bold font-mono">AF</span>
+            <span className="text-white text-xs font-bold font-mono">CAT</span>
           </div>
           <span className="font-semibold text-[#e6edf3] tracking-wide">Caterpillar Inc. Fleet</span>
         </div>
@@ -140,54 +140,54 @@ export function Layout() {
             <button
               onClick={onResume}
               disabled={busy}
-              title="Clear the software halt and re-enable auto-dispatch"
+              title="Limpa a parada por software e reativa o despacho automático"
               className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-md text-sm font-bold
                 bg-[#238636] hover:bg-[#2ea043] text-white transition-colors disabled:opacity-50"
             >
-              <Play className="w-4 h-4" /> RESUME FLEET
+              <Play className="w-4 h-4" /> RETOMAR FROTA
             </button>
           ) : (
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <button
                   disabled={busy}
-                  title="Software Stop — not a hardware E-stop"
+                  title="Parada por software — não é uma parada de emergência física"
                   className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-md text-sm font-bold
                     bg-[#da3633] hover:bg-[#f85149] text-white transition-colors disabled:opacity-50 animate-none"
                 >
-                  <OctagonX className="w-4 h-4" /> STOP ALL
+                  <OctagonX className="w-4 h-4" /> PARAR TUDO
                 </button>
               </AlertDialogTrigger>
               <AlertDialogContent className="bg-[#161b22] border-[#30363d] text-[#c9d1d9]">
                 <AlertDialogHeader>
                   <AlertDialogTitle className="flex items-center gap-2 text-[#f85149]">
-                    <ShieldAlert className="w-5 h-5" /> Stop the entire fleet?
+                    <ShieldAlert className="w-5 h-5" /> Parar toda a frota?
                   </AlertDialogTitle>
                   <AlertDialogDescription className="text-[#8b949e]">
-                    This halts every robot, cancels all active tasks, and pauses auto-dispatch
-                    until you press Resume.
+                    Isto interrompe todos os robôs, cancela todas as tarefas ativas e pausa o
+                    despacho automático até você pressionar Retomar.
                     <span className="block mt-2 text-[#d29922] font-medium">
-                      This is a Software Stop — NOT a hardware E-stop. Use the physical E-stop for
-                      real emergencies.
+                      Esta é uma Parada por Software — NÃO é uma parada de emergência física. Use a
+                      parada de emergência física para emergências reais.
                     </span>
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   <AlertDialogCancel className="bg-transparent border-[#30363d] text-[#c9d1d9] hover:bg-[#21262d]">
-                    Cancel
+                    Cancelar
                   </AlertDialogCancel>
                   <AlertDialogAction
                     onClick={onStopAll}
                     className="bg-[#da3633] hover:bg-[#f85149] text-white border-0"
                   >
-                    Stop All
+                    Parar Tudo
                   </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
           )}
           <p className="text-[10px] text-[#6e7681] text-center mt-1.5 leading-tight">
-            Software Stop — not a hardware E-stop
+            Parada por Software — não é uma parada de emergência física
           </p>
         </div>
 
@@ -197,12 +197,12 @@ export function Layout() {
           <div className="flex items-center gap-1.5">
             <div className={`w-2 h-2 rounded-full shrink-0 ${connected ? 'bg-green-400' : 'bg-red-400 animate-pulse'}`} />
             <span className={connected ? 'text-green-400' : 'text-red-400'}>
-              {connected ? 'Backend live' : 'Connecting…'}
+              {connected ? 'Backend ativo' : 'Conectando…'}
             </span>
           </div>
           <div className="flex gap-3">
-            <span>{robots.length} robots</span>
-            {activeRobots > 0 && <span className="text-[#58a6ff]">{activeRobots} active</span>}
+            <span>{robots.length} robôs</span>
+            {activeRobots > 0 && <span className="text-[#58a6ff]">{activeRobots} ativos</span>}
           </div>
           <div className="text-[#6e7681]">v0.1.0 alpha</div>
         </div>
@@ -214,7 +214,7 @@ export function Layout() {
           <div className="flex items-center justify-center gap-2 bg-[#da3633] text-white text-xs font-bold
             uppercase tracking-wide py-1.5 px-4 shrink-0">
             <ShieldAlert className="w-4 h-4" />
-            Fleet halted — software stop engaged · auto-dispatch paused
+            Frota interrompida — parada por software acionada · despacho automático pausado
           </div>
         )}
         <Outlet />
