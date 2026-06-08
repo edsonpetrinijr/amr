@@ -1,10 +1,10 @@
 @echo off
-title BehaveX — Fleet
+title Caterpillar Inc. Fleet — Fleet
 cd /d "%~dp0"
 
 echo.
 echo  ╔══════════════════════════════════╗
-echo  ║   BehaveX Fleet — Starting...   ║
+echo  ║   Caterpillar Fleet — Starting...   ║
 echo  ╚══════════════════════════════════╝
 echo.
 

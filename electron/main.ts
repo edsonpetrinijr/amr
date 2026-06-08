@@ -4,6 +4,10 @@ import path from 'node:path'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
+// Electron falls back to package.json "name" for app.getName() and the default
+// window/taskbar title. Force the product name so nothing surfaces the old name.
+app.setName('Caterpillar Inc. Fleet')
+
 process.env.APP_ROOT = path.join(__dirname, '..')
 
 export const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
@@ -18,6 +22,7 @@ let win: BrowserWindow | null
 
 function createWindow() {
   win = new BrowserWindow({
+    title: 'Caterpillar Inc. Fleet',
     width: 1400,
     height: 900,
     minWidth: 1000,
