@@ -36,7 +36,7 @@ import asyncio
 import logging
 import threading
 import time
-from typing import Optional, TYPE_CHECKING
+from typing import Callable, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..dispatcher import Dispatcher
@@ -65,6 +65,16 @@ def build_node_map() -> dict[str, tuple[str, str]]:
         if s.get("opcua_ret"):
             node_map[s["opcua_ret"]] = (s["id"], "ret")
     return node_map
+
+
+def build_action_map() -> dict[str, str]:
+    """node_id_str → action name ("confirm-delivery" | "request-empty").
+
+    Read from ``config.OPCUA_ACTION_MAP`` (added by backend; env-overridable JSON,
+    defaults to {}). Fall back to an empty map if config doesn't define it yet so
+    this module imports cleanly before the backend change lands.
+    """
+    return dict(getattr(config, "OPCUA_ACTION_MAP", {}) or {})
 
 
 def _jsonable(value):
@@ -138,13 +148,22 @@ def probe_node(node_id: str, endpoint: Optional[str] = None,
 
 
 class _SubscriptionHandler:
-    """asyncua subscription handler: fires dispatcher on rising-edge True, debounced."""
+    """asyncua subscription handler: fires dispatcher/action on rising-edge True, debounced.
+
+    A node-id present in ``action_map`` is routed to ``action_handler(action_name)``
+    instead of the dispatcher. ``action_map`` takes precedence over ``node_map`` if a
+    node-id appears in both.
+    """
 
     def __init__(self, node_map: dict[str, tuple[str, str]], dispatcher: "Dispatcher",
-                 debounce_s: float) -> None:
+                 debounce_s: float,
+                 action_map: Optional[dict[str, str]] = None,
+                 action_handler: Optional[Callable[[str], None]] = None) -> None:
         self._node_map = node_map
         self._dispatcher = dispatcher
         self._debounce_s = debounce_s
+        self._action_map = action_map or {}
+        self._action_handler = action_handler
         self._last: dict[str, bool] = {}
         self._last_fire: dict[str, float] = {}
 
@@ -154,10 +173,11 @@ class _SubscriptionHandler:
 
     def datachange_notification(self, node, val, data):  # noqa: ANN001 (asyncua API)
         node_id = node.nodeid.to_string()
-        entry = self._node_map.get(node_id)
-        if entry is None:
+        action = self._action_map.get(node_id)         # action map wins over station map
+        entry = None if action is not None else self._node_map.get(node_id)
+        if action is None and entry is None:
             return
-        station_id, direction = entry
+
         prev = self._last.get(node_id, False)
         cur = bool(val)
         self._last[node_id] = cur
@@ -167,10 +187,24 @@ class _SubscriptionHandler:
 
         now = time.monotonic()
         if now - self._last_fire.get(node_id, -1e9) < self._debounce_s:
-            log.debug("[OpcUA] debounced rising edge node=%s station=%s", node_id, station_id)
+            log.debug("[OpcUA] debounced rising edge node=%s", node_id)
             return
         self._last_fire[node_id] = now
 
+        if action is not None:
+            if self._action_handler is None:
+                log.warning("[OpcUA] action node %s fired (%s) but no action_handler "
+                            "configured — skipping", node_id, action)
+                return
+            log.info("[OpcUA] action button pressed: node=%s action=%s", node_id, action)
+            try:
+                self._action_handler(action)
+            except Exception as e:  # noqa: BLE001 — never let a handler exception kill the sub
+                log.exception("[OpcUA] action_handler failed for %s (%s): %s",
+                              node_id, action, e)
+            return
+
+        station_id, direction = entry
         log.info("[OpcUA] button pressed: node=%s station=%s dir=%s", node_id, station_id, direction)
         try:
             task = self._dispatcher.button_pressed(station_id, direction)
@@ -198,8 +232,10 @@ class OpcUaCallbuttonDriver:
         driver.stop()    # clean shutdown
     """
 
-    def __init__(self, dispatcher: "Dispatcher") -> None:
+    def __init__(self, dispatcher: "Dispatcher",
+                 action_handler: Optional[Callable[[str], None]] = None) -> None:
         self._dispatcher = dispatcher
+        self._action_handler = action_handler
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -257,9 +293,29 @@ class OpcUaCallbuttonDriver:
 
     async def _monitor(self) -> None:
         node_map = build_node_map()
-        if not node_map:
+        action_map = build_action_map()
+
+        # Warn on any node configured as both station and action (action wins).
+        overlap = set(node_map) & set(action_map)
+        for nid in overlap:
+            log.warning("[OpcUA] node %s in both station and action maps — treating as "
+                        "action (%s)", nid, action_map[nid])
+
+        if not node_map and not action_map:
             log.info("No OPC UA callbutton nodes configured")
             return
+
+        if action_map and self._action_handler is None:
+            log.warning("[OpcUA] %d action node(s) configured but no action_handler — "
+                        "they will be subscribed but presses are skipped", len(action_map))
+
+        # Union of node-ids to subscribe; action map takes precedence over station map.
+        # value = ("action", name) | ("station", (station_id, direction))
+        targets: dict[str, tuple[str, object]] = {}
+        for nid, entry in node_map.items():
+            targets[nid] = ("station", entry)
+        for nid, name in action_map.items():
+            targets[nid] = ("action", name)
 
         backoff = config.OPCUA_RECONNECT_MIN_S
         while not self._stop.is_set():
@@ -269,13 +325,17 @@ class OpcUaCallbuttonDriver:
                     backoff = config.OPCUA_RECONNECT_MIN_S  # reset after a good connect
 
                     handler = _SubscriptionHandler(node_map, self._dispatcher,
-                                                   config.OPCUA_DEBOUNCE_S)
+                                                   config.OPCUA_DEBOUNCE_S,
+                                                   action_map=action_map,
+                                                   action_handler=self._action_handler)
                     subscription = await client.create_subscription(
                         config.OPCUA_SUB_PERIOD_MS, handler
                     )
 
                     subscribed = 0
-                    for node_id, (station, direction) in node_map.items():
+                    for node_id, (kind, payload) in targets.items():
+                        label = (f"action={payload}" if kind == "action"
+                                 else f"{payload[0]}/{payload[1]}")
                         node = client.get_node(node_id)
                         key = node.nodeid.to_string()
                         try:
@@ -286,10 +346,10 @@ class OpcUaCallbuttonDriver:
                                 handler.seed(key, False)
                             await subscription.subscribe_data_change(node)
                             subscribed += 1
-                            log.info("[OpcUA] subscribed %s → %s/%s", node_id, station, direction)
+                            log.info("[OpcUA] subscribed %s → %s", node_id, label)
                         except Exception as e:  # noqa: BLE001 — skip bad node, keep the rest
-                            log.warning("[OpcUA] node %s (%s/%s) unavailable: %s — skipping",
-                                        node_id, station, direction, e)
+                            log.warning("[OpcUA] node %s (%s) unavailable: %s — skipping",
+                                        node_id, label, e)
 
                     if subscribed == 0:
                         raise RuntimeError("no OPC UA nodes could be subscribed")
