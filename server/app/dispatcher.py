@@ -469,6 +469,7 @@ class Dispatcher:
             self.provider.tick(dt)
             if self.soak is not None:
                 self.soak.tick(dt)
+            self._settle_returning()
             self._assign_pending()
             self._advance_active(dt)
             self._check_recovery(dt)
@@ -588,6 +589,15 @@ class Dispatcher:
         if base:
             robot.status = RETURNING
             self.provider.goto(robot.id, base.x, base.y, base.id)
+
+    def _settle_returning(self) -> None:
+        """A robot that has finished returning to base becomes available again.
+        Without this a RETURNING robot never flips back to IDLE, so it would
+        accept no further tasks after its first delivery."""
+        for robot in self.provider.robots.values():
+            if robot.status == RETURNING and not robot.current_task \
+                    and self.provider.arrived(robot.id):
+                robot.status = IDLE
 
     # ── Failure recovery ──────────────────────────────────────────────────────
 
