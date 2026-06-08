@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { ListChecks, Plus, X } from 'lucide-react'
+import { toast } from 'sonner'
 import { useFleet } from '../state/store'
 import { fleetApi } from '../api/fleet'
 import { Badge } from '../components/ui/badge'
@@ -20,18 +21,18 @@ const STATE_VARIANT: Record<string, 'success' | 'destructive' | 'default' | 'sec
 function elapsed(ts: number | null) {
   if (!ts) return '—'
   const s = Math.floor((Date.now() / 1000) - ts)
-  if (s < 60)  return `${s}s ago`
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`
-  return `${Math.floor(s / 3600)}h ago`
+  if (s < 60)  return `${s}s atrás`
+  if (s < 3600) return `${Math.floor(s / 60)}min atrás`
+  return `${Math.floor(s / 3600)}h atrás`
 }
 
-function TaskRow({ task, onCancel }: { task: Task; onCancel?: (id: string) => void }) {
+function TaskRow({ task, stationLabel, onCancel }: { task: Task; stationLabel: (id: string) => string; onCancel?: (id: string) => void }) {
   const active = !['done', 'cancelled', 'failed'].includes(task.state)
   return (
     <tr className="border-b border-[#21262d] hover:bg-[#161b22] transition-colors text-xs">
       <td className="px-3 py-2 font-mono text-[#8b949e]">{task.id.slice(-8)}</td>
-      <td className="px-3 py-2 text-[#c9d1d9]">{task.pickup}</td>
-      <td className="px-3 py-2 text-[#c9d1d9]">{task.dropoff}</td>
+      <td className="px-3 py-2 text-[#c9d1d9]">{stationLabel(task.pickup)}</td>
+      <td className="px-3 py-2 text-[#c9d1d9]">{stationLabel(task.dropoff)}</td>
       <td className="px-3 py-2">
         <Badge variant={STATE_VARIANT[task.state] ?? 'outline'}>
           {task.state.replace('_', ' ')}
@@ -60,6 +61,7 @@ export function Tasks() {
   const [filter,   setFilter]   = useState<'all' | 'active' | 'done'>('all')
 
   const aps = stations.filter(s => s.type !== 'base')
+  const stationLabel = (id: string) => stations.find(s => s.id === id)?.label ?? id
   const filtered = allTasks.filter(t => {
     if (filter === 'active') return !['done', 'cancelled', 'failed'].includes(t.state)
     if (filter === 'done')   return  ['done', 'cancelled', 'failed'].includes(t.state)
@@ -72,13 +74,19 @@ export function Tasks() {
     try {
       await fleetApi.createTask(pickup, dropoff)
       setPickup(''); setDropoff(''); setShowForm(false)
-    } catch (e) { console.error(e) }
+    } catch (e) {
+      console.error(e)
+      toast.error('Falha ao criar tarefa')
+    }
     finally { setSending(false) }
   }
 
   async function handleCancel(id: string) {
     try { await fleetApi.cancelTask(id) }
-    catch (e) { console.error(e) }
+    catch (e) {
+      console.error(e)
+      toast.error('Falha ao cancelar tarefa')
+    }
   }
 
   return (
@@ -86,9 +94,9 @@ export function Tasks() {
       {/* Header */}
       <div className="border-b border-[#30363d] px-6 py-3 flex items-center gap-3 flex-shrink-0">
         <ListChecks className="w-4 h-4 text-[#58a6ff]" />
-        <h1 className="text-sm font-semibold text-[#e6edf3]">Tasks</h1>
+        <h1 className="text-sm font-semibold text-[#e6edf3]">Tarefas</h1>
         <div className={`w-2 h-2 rounded-full ml-2 ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
-        <span className="text-xs text-[#8b949e]">{allTasks.length} total</span>
+        <span className="text-xs text-[#8b949e]">{allTasks.length} no total</span>
 
         {/* Filter tabs */}
         <div className="ml-4 flex gap-1">
@@ -98,7 +106,7 @@ export function Tasks() {
                 filter === f
                   ? 'bg-[#21262d] text-[#e6edf3] border border-[#58a6ff]'
                   : 'text-[#8b949e] hover:text-[#c9d1d9]'}`}>
-              {f}
+              {f === 'all' ? 'Todas' : f === 'active' ? 'Ativas' : 'Concluídas'}
             </button>
           ))}
         </div>
@@ -106,7 +114,7 @@ export function Tasks() {
         <div className="ml-auto">
           <Button variant="primary" size="sm" onClick={() => setShowForm(v => !v)}>
             <Plus className="w-3.5 h-3.5 mr-1" />
-            New task
+            Nova tarefa
           </Button>
         </div>
       </div>
@@ -116,19 +124,19 @@ export function Tasks() {
         <div className="border-b border-[#30363d] px-6 py-3 flex items-center gap-3 bg-[#161b22] flex-shrink-0">
           <select className="text-xs bg-[#0d1117] border border-[#30363d] text-[#c9d1d9] rounded px-2 py-1"
             value={pickup} onChange={e => setPickup(e.target.value)}>
-            <option value="">Pickup station…</option>
+            <option value="">Estação de coleta…</option>
             {aps.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
           </select>
           <span className="text-[#8b949e] text-xs">→</span>
           <select className="text-xs bg-[#0d1117] border border-[#30363d] text-[#c9d1d9] rounded px-2 py-1"
             value={dropoff} onChange={e => setDropoff(e.target.value)}>
-            <option value="">Drop-off station…</option>
+            <option value="">Estação de entrega…</option>
             {aps.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
           </select>
           <Button variant="primary" size="sm" disabled={!pickup || !dropoff || sending} onClick={handleCreate}>
-            {sending ? 'Creating…' : 'Create'}
+            {sending ? 'Criando…' : 'Criar'}
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => setShowForm(false)}>Cancel</Button>
+          <Button variant="ghost" size="sm" onClick={() => setShowForm(false)}>Cancelar</Button>
         </div>
       )}
 
@@ -136,23 +144,23 @@ export function Tasks() {
       <div className="flex-1 overflow-auto">
         {filtered.length === 0 ? (
           <div className="h-full flex items-center justify-center text-[#8b949e] text-sm">
-            No tasks yet
+            Nenhuma tarefa ainda
           </div>
         ) : (
           <table className="w-full text-xs">
             <thead className="sticky top-0 bg-[#161b22] border-b border-[#30363d]">
               <tr className="text-[#8b949e]">
                 <th className="px-3 py-2 text-left font-medium">ID</th>
-                <th className="px-3 py-2 text-left font-medium">Pickup</th>
-                <th className="px-3 py-2 text-left font-medium">Drop-off</th>
-                <th className="px-3 py-2 text-left font-medium">State</th>
-                <th className="px-3 py-2 text-left font-medium">Robot</th>
-                <th className="px-3 py-2 text-left font-medium">Created</th>
+                <th className="px-3 py-2 text-left font-medium">Coleta</th>
+                <th className="px-3 py-2 text-left font-medium">Entrega</th>
+                <th className="px-3 py-2 text-left font-medium">Estado</th>
+                <th className="px-3 py-2 text-left font-medium">Robô</th>
+                <th className="px-3 py-2 text-left font-medium">Criada</th>
                 <th className="px-3 py-2" />
               </tr>
             </thead>
             <tbody>
-              {filtered.map(t => <TaskRow key={t.id} task={t} onCancel={handleCancel} />)}
+              {filtered.map(t => <TaskRow key={t.id} task={t} stationLabel={stationLabel} onCancel={handleCancel} />)}
             </tbody>
           </table>
         )}

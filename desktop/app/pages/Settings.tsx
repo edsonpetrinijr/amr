@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Settings, Save, AlertTriangle, CheckCircle, Wifi, WifiOff } from 'lucide-react'
+import { toast } from 'sonner'
 import { useFleet } from '../state/store'
 import { fleetApi, FleetApiError, type MapInfo } from '../api/fleet'
 import { Button } from '../components/ui/button'
@@ -59,7 +60,7 @@ function MapSelector() {
         setMaps(list)
         setSelected(list.find(m => m.current)?.name ?? list[0]?.name ?? '')
       })
-      .catch(e => { if (alive) setError(e instanceof Error ? e.message : 'Failed to load maps') })
+      .catch(e => { if (alive) setError(e instanceof Error ? e.message : 'Falha ao carregar mapas') })
     return () => { alive = false }
   }, [])
 
@@ -74,7 +75,7 @@ function MapSelector() {
       setMaps(ms => ms.map(m => ({ ...m, current: m.name === name })))
     } catch (e) {
       setSelected(prev)    // revert on failure
-      setError(e instanceof FleetApiError ? e.message : (e instanceof Error ? e.message : 'Failed to switch map'))
+      setError(e instanceof FleetApiError ? e.message : (e instanceof Error ? e.message : 'Falha ao trocar de mapa'))
     } finally {
       setBusy(false)
     }
@@ -89,12 +90,12 @@ function MapSelector() {
         disabled={busy || maps.length === 0}
         onChange={e => onChange(e.target.value)}
       >
-        {maps.length === 0 && <option value="">No maps available</option>}
+        {maps.length === 0 && <option value="">Nenhum mapa disponível</option>}
         {maps.map(m => (
           <option key={m.name} value={m.name} className="bg-[#0d1117] text-[#c9d1d9]">{m.name}</option>
         ))}
       </select>
-      {busy && <span className="text-xs text-[#8b949e]">Switching…</span>}
+      {busy && <span className="text-xs text-[#8b949e]">Trocando…</span>}
       {error && <span className="text-xs text-red-400">{error}</span>}
     </div>
   )
@@ -144,8 +145,10 @@ export function SettingsPage() {
         body: JSON.stringify({ sim_mode: !simInfo.sim_mode }),
       })
       if (res.ok) setSimInfo(prev => prev ? { ...prev, sim_mode: !prev.sim_mode } : null)
+      else toast.error('Falha ao alterar o Modo Simulação')
     } catch (e) {
       console.error(e)
+      toast.error('Falha ao alterar o Modo Simulação', { description: 'Backend inacessível' })
     } finally {
       setSimLoading(false)
     }
@@ -159,7 +162,10 @@ export function SettingsPage() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ endpoint: opcuaEndpoint }),
-    }).catch(console.error)
+    }).catch(e => {
+      console.error(e)
+      toast.error('Falha ao salvar configurações', { description: 'Não foi possível aplicar o endpoint OPC UA' })
+    })
   }
 
   return (
@@ -167,16 +173,16 @@ export function SettingsPage() {
       {/* Header */}
       <div className="border-b border-[#30363d] px-6 py-3 flex items-center gap-3 flex-shrink-0">
         <Settings className="w-4 h-4 text-[#58a6ff]" />
-        <h1 className="text-sm font-semibold text-[#e6edf3]">Settings</h1>
+        <h1 className="text-sm font-semibold text-[#e6edf3]">Configurações</h1>
         <div className={`w-2 h-2 rounded-full ml-2 ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
-        <span className="text-xs text-[#8b949e]">{connected ? 'Connected' : 'Disconnected'}</span>
+        <span className="text-xs text-[#8b949e]">{connected ? 'Conectado' : 'Desconectado'}</span>
       </div>
 
       <div className="flex-1 overflow-auto p-6 max-w-2xl space-y-6">
 
         {/* Connection */}
-        <Section title="Backend Connection">
-          <Row label="Backend URL" sub="SSE event stream and REST API base URL">
+        <Section title="Conexão com o Backend">
+          <Row label="URL do Backend" sub="URL base do stream de eventos SSE e da API REST">
             <div className="flex gap-2">
               <input
                 className="w-52 bg-[#0d1117] border border-[#30363d] rounded px-3 py-1.5 text-xs font-mono text-[#c9d1d9]
@@ -186,16 +192,16 @@ export function SettingsPage() {
               />
               {urlDirty && (
                 <Button size="sm" onClick={saveBackendUrl} variant="primary">
-                  <Save className="w-3 h-3 mr-1" /> Save
+                  <Save className="w-3 h-3 mr-1" /> Salvar
                 </Button>
               )}
             </div>
           </Row>
-          <Row label="Connection status" sub="">
+          <Row label="Status da conexão" sub="">
             <div className="flex items-center gap-2 text-xs">
               {connected
-                ? <><Wifi className="w-4 h-4 text-green-400" /><span className="text-green-400">Live</span></>
-                : <><WifiOff className="w-4 h-4 text-red-400" /><span className="text-red-400">No connection</span></>
+                ? <><Wifi className="w-4 h-4 text-green-400" /><span className="text-green-400">Ativo</span></>
+                : <><WifiOff className="w-4 h-4 text-red-400" /><span className="text-red-400">Sem conexão</span></>
               }
               {simInfo?.version && (
                 <Badge variant="outline" className="ml-2">v{simInfo.version}</Badge>
@@ -205,10 +211,10 @@ export function SettingsPage() {
         </Section>
 
         {/* Simulation */}
-        <Section title="Simulation">
+        <Section title="Simulação">
           <Row
-            label="Sim Mode"
-            sub="When enabled, robots are simulated; no SEER TCP connections are made">
+            label="Modo Simulação"
+            sub="Quando ativado, os robôs são simulados; nenhuma conexão TCP SEER é feita">
             <div className="flex items-center gap-3">
               {simInfo ? (
                 <>
@@ -218,11 +224,11 @@ export function SettingsPage() {
                     disabled={simLoading}
                   />
                   <Badge variant={simInfo.sim_mode ? 'secondary' : 'outline'}>
-                    {simInfo.sim_mode ? 'Sim' : 'Hardware'}
+                    {simInfo.sim_mode ? 'Simulação' : 'Hardware'}
                   </Badge>
                 </>
               ) : (
-                <span className="text-xs text-[#8b949e]">unavailable</span>
+                <span className="text-xs text-[#8b949e]">indisponível</span>
               )}
             </div>
           </Row>
@@ -230,15 +236,15 @@ export function SettingsPage() {
             <Row label="" sub="">
               <div className="flex items-center gap-2 text-xs text-[#d29922]">
                 <AlertTriangle className="w-4 h-4" />
-                <span>Hardware mode — real AMRs will be commanded</span>
+                <span>Modo hardware — AMRs reais serão comandados</span>
               </div>
             </Row>
           )}
         </Section>
 
         {/* OPC UA */}
-        <Section title="OPC UA (Call Buttons)">
-          <Row label="Endpoint URL" sub="Adilson's PLC OPC UA server address">
+        <Section title="OPC UA (Botões de Chamada)">
+          <Row label="URL do Endpoint" sub="Endereço do servidor OPC UA do CLP">
             <div className="flex gap-2">
               <input
                 className="w-56 bg-[#0d1117] border border-[#30363d] rounded px-3 py-1.5 text-xs font-mono text-[#c9d1d9]
@@ -249,7 +255,7 @@ export function SettingsPage() {
               />
               {opcuaDirty && (
                 <Button size="sm" onClick={saveOpcua} variant="primary">
-                  <Save className="w-3 h-3 mr-1" /> Apply
+                  <Save className="w-3 h-3 mr-1" /> Aplicar
                 </Button>
               )}
             </div>
@@ -257,25 +263,25 @@ export function SettingsPage() {
           <Row label="Status" sub="">
             <span className="text-xs text-[#8b949e]">
               {opcuaEndpoint
-                ? <span className="flex items-center gap-1.5"><CheckCircle className="w-3.5 h-3.5 text-green-500" /> Configured</span>
-                : 'Not configured — buttons unavailable'}
+                ? <span className="flex items-center gap-1.5"><CheckCircle className="w-3.5 h-3.5 text-green-500" /> Configurado</span>
+                : 'Não configurado — botões indisponíveis'}
             </span>
           </Row>
         </Section>
 
         {/* Facility */}
-        <Section title="Facility">
-          <Row label="Active facility" sub="Multi-facility support coming in a future release">
+        <Section title="Instalação">
+          <Row label="Instalação ativa" sub="Suporte a múltiplas instalações chegará em uma versão futura">
             <Badge variant="outline" className="font-mono">Piracicaba</Badge>
           </Row>
-          <Row label="Map file" sub=".smap loaded by the backend — switch the active map at runtime">
+          <Row label="Arquivo de mapa" sub=".smap carregado pelo backend — troque o mapa ativo em tempo de execução">
             <MapSelector />
           </Row>
         </Section>
 
         {/* About */}
-        <Section title="About">
-          <Row label="Caterpillar Inc. Fleet" sub="Fleet management system for Caterpillar Piracicaba">
+        <Section title="Sobre">
+          <Row label="Caterpillar Inc. Fleet" sub="Sistema de gestão de frota para a Caterpillar Piracicaba">
             <Badge variant="outline">v0.1.0 alpha</Badge>
           </Row>
           <Row label="Backend" sub="Python Flask · SEER Robokit TCP driver · asyncua">

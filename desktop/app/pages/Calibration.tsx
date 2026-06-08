@@ -29,7 +29,7 @@ function JogPanel({ robot }: { robot: Robot }) {
 
   return (
     <div className="bg-[#161b22] border border-[#30363d] rounded-lg p-4">
-      <h3 className="text-xs text-[#8b949e] mb-3 font-medium uppercase tracking-wide">Manual Jog</h3>
+      <h3 className="text-xs text-[#8b949e] mb-3 font-medium uppercase tracking-wide">Comando Manual</h3>
       <p className="text-[#6e7681] text-xs mb-3">
         Use <span className="text-[#c9d1d9] font-mono">WASD</span> para mover (segure),
         {' '}<span className="text-[#c9d1d9] font-mono">Q/E</span> para girar.
@@ -111,9 +111,9 @@ function JackPanel({ robot }: { robot: Robot }) {
 
   return (
     <div className="bg-[#161b22] border border-[#30363d] rounded-lg p-4">
-      <h3 className="text-xs text-[#8b949e] mb-3 font-medium uppercase tracking-wide">Jack / Load Platform</h3>
+      <h3 className="text-xs text-[#8b949e] mb-3 font-medium uppercase tracking-wide">Macaco / Plataforma de Carga</h3>
       <p className="text-[#6e7681] text-xs mb-3">
-        Executa um pulso completo (POST /jack) — leva alguns segundos para concluir.
+        Executa um pulso completo — leva alguns segundos para concluir.
       </p>
       <div className="flex gap-2">
         <Button variant="outline" size="sm" disabled={busy} onClick={() => jack('up')}
@@ -121,18 +121,18 @@ function JackPanel({ robot }: { robot: Robot }) {
           {sending === 'up'
             ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
             : <ChevronUp className="w-3.5 h-3.5 mr-1" />}
-          Raise
+          Levantar
         </Button>
         <Button variant="outline" size="sm" disabled={busy} onClick={() => jack('down')}
           className="flex-1">
           {sending === 'down'
             ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
             : <ChevronDown className="w-3.5 h-3.5 mr-1" />}
-          Lower
+          Abaixar
         </Button>
       </div>
       {lastAction && !busy && (
-        <p className="text-xs text-[#3fb950] mt-2">Last: {lastAction}</p>
+        <p className="text-xs text-[#3fb950] mt-2">Última ação: {lastAction}</p>
       )}
     </div>
   )
@@ -157,8 +157,8 @@ function RelocalizePanel({ robot }: { robot: Robot }) {
     setResult(null)
     try {
       const r = await fleetApi.relocalize(robot.id, parseFloat(x), parseFloat(y), parseFloat(theta) * Math.PI / 180)
-      setResult(r.ok ? '✓ Relocalization sent' : '✗ Failed')
-    } catch { setResult('✗ Error') }
+      setResult(r.ok ? '✓ Relocalização enviada' : '✗ Falhou')
+    } catch { setResult('✗ Erro') }
     finally { setSending(false) }
   }
 
@@ -170,12 +170,12 @@ function RelocalizePanel({ robot }: { robot: Robot }) {
     } catch (e) {
       setAssist(null)
       if (e instanceof FleetApiError) {
-        if (e.status === 409)      toast.error('No map loaded', { description: 'Load a map before requesting suggestions.' })
-        else if (e.status === 404) toast.error('Robot pose unavailable', { description: 'The system does not know where this robot is yet.' })
-        else if (e.status === 400) toast.error('Missing parameters', { description: e.message })
-        else                       toast.error('Could not get suggestions', { description: e.message })
+        if (e.status === 409)      toast.error('Nenhum mapa carregado', { description: 'Carregue um mapa antes de solicitar sugestões.' })
+        else if (e.status === 404) toast.error('Pose do robô indisponível', { description: 'O sistema ainda não sabe onde este robô está.' })
+        else if (e.status === 400) toast.error('Parâmetros ausentes', { description: e.message })
+        else                       toast.error('Não foi possível obter sugestões', { description: e.message })
       } else {
-        toast.error('Could not get suggestions', { description: 'Backend not reachable' })
+        toast.error('Não foi possível obter sugestões', { description: 'Backend inacessível' })
       }
     } finally {
       setAssistLoading(false)
@@ -192,9 +192,9 @@ function RelocalizePanel({ robot }: { robot: Robot }) {
 
   return (
     <div className="bg-[#161b22] border border-[#30363d] rounded-lg p-4">
-      <h3 className="text-xs text-[#8b949e] mb-3 font-medium uppercase tracking-wide">Relocalization</h3>
+      <h3 className="text-xs text-[#8b949e] mb-3 font-medium uppercase tracking-wide">Relocalização</h3>
       <p className="text-[#6e7681] text-xs mb-3">
-        Set initial pose estimate on the map. Click a landmark on the map to pre-fill coordinates.
+        Defina a estimativa de pose inicial no mapa. Clique em um marco no mapa para preencher as coordenadas.
       </p>
       <div className="grid grid-cols-3 gap-2 mb-3">
         {([['X (m)', x, setX], ['Y (m)', y, setY], ['θ (°)', theta, setTheta]] as [string, string, (v: string) => void][]).map(([lbl, val, set]) => (
@@ -206,7 +206,7 @@ function RelocalizePanel({ robot }: { robot: Robot }) {
         ))}
       </div>
       <Button variant="primary" size="sm" className="w-full" disabled={sending} onClick={handleRelocalize}>
-        {sending ? 'Sending…' : 'Set Pose'}
+        {sending ? 'Enviando…' : 'Definir Pose'}
       </Button>
       {result && <p className="text-xs mt-2 text-[#3fb950]">{result}</p>}
 
@@ -214,27 +214,27 @@ function RelocalizePanel({ robot }: { robot: Robot }) {
       <div className="mt-4 pt-3 border-t border-[#30363d]">
         <div className="flex items-center justify-between mb-2">
           <h4 className="text-xs text-[#8b949e] font-medium uppercase tracking-wide flex items-center gap-1.5">
-            <Crosshair className="w-3.5 h-3.5" /> Relocalization Assist
+            <Crosshair className="w-3.5 h-3.5" /> Assistente de Relocalização
           </h4>
           <Button variant="outline" size="sm" disabled={assistLoading} onClick={handleGetSuggestions}>
             {assistLoading ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : null}
-            {assistLoading ? 'Finding…' : 'Get suggestions'}
+            {assistLoading ? 'Buscando…' : 'Obter sugestões'}
           </Button>
         </div>
         <p className="text-[#6e7681] text-xs mb-2">
-          Suggests the nearest map landmarks to where the system thinks {robot.id} is. Pick one to pre-fill the pose.
+          Sugere os marcos do mapa mais próximos de onde o sistema acredita que {robot.id} está. Escolha um para preencher a pose.
         </p>
 
         {assist && (
           <p className="text-[10px] text-[#6e7681] font-mono mb-2">
-            pose used: x={assist.pose_used.x.toFixed(2)} y={assist.pose_used.y.toFixed(2)}
+            pose usada: x={assist.pose_used.x.toFixed(2)} y={assist.pose_used.y.toFixed(2)}
             {assist.pose_used.confidence != null ? ` · conf ${(assist.pose_used.confidence * 100).toFixed(0)}%` : ''}
-            {' '}· {assist.source === 'robot_state' ? 'from robot' : 'explicit'}
+            {' '}· {assist.source === 'robot_state' ? 'do robô' : 'explícita'}
           </p>
         )}
 
         {assist && assist.suggestions.length === 0 && (
-          <p className="text-xs text-[#8b949e] py-2">No landmarks found.</p>
+          <p className="text-xs text-[#8b949e] py-2">Nenhum marco encontrado.</p>
         )}
 
         {assist && assist.suggestions.length > 0 && (
@@ -246,7 +246,7 @@ function RelocalizePanel({ robot }: { robot: Robot }) {
                 <span className="text-[#8b949e] font-mono shrink-0">{s.dist_m.toFixed(1)} m</span>
                 <Button variant="outline" size="sm" className="shrink-0 h-6 px-2"
                   onClick={() => applySuggestion(s)}>
-                  Use
+                  Usar
                 </Button>
               </li>
             ))}
@@ -280,7 +280,7 @@ export function Calibration() {
       {/* Header */}
       <div className="border-b border-[#30363d] px-6 py-3 flex items-center gap-3 flex-shrink-0">
         <Wrench className="w-4 h-4 text-[#58a6ff]" />
-        <h1 className="text-sm font-semibold text-[#e6edf3]">Calibration</h1>
+        <h1 className="text-sm font-semibold text-[#e6edf3]">Calibração</h1>
         <div className={`w-2 h-2 rounded-full ml-2 ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
         {robot && (
           <Badge variant="secondary" className="ml-1">{robot.id}</Badge>
@@ -301,7 +301,7 @@ export function Calibration() {
 
       {!robot ? (
         <div className="flex-1 flex items-center justify-center text-[#8b949e] text-sm">
-          Select a robot above to begin calibration
+          Selecione um robô acima para iniciar a calibração
         </div>
       ) : (
         <div className="flex-1 overflow-auto p-6">
@@ -309,8 +309,8 @@ export function Calibration() {
           <div className="flex items-start gap-2 bg-yellow-900/20 border border-yellow-700/40 rounded-lg px-4 py-3 mb-5 text-xs text-yellow-300">
             <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
             <span>
-              Calibration commands bypass the dispatcher and send directly to the robot hardware.
-              Ensure the area is clear before relocalization or jog movements.
+              Comandos de calibração ignoram o despachante e são enviados diretamente ao hardware do robô.
+              Garanta que a área esteja livre antes de relocalização ou movimentos manuais.
             </span>
           </div>
 
