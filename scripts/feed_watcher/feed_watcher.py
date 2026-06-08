@@ -57,6 +57,41 @@ def fs_timestamp(dt: datetime) -> str:
     return f"{base}_{hh}"
 
 
+def hms(dt: datetime) -> str:
+    """Just the clock time HH:MM:SS for chatty status lines."""
+    return dt.strftime("%H:%M:%S")
+
+
+def human_size(num_bytes) -> str:
+    """58312345 -> '55.6MB' (binary units, 1 decimal)."""
+    size = float(num_bytes)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if size < 1024.0 or unit == "TB":
+            if unit == "B":
+                return f"{int(size)}{unit}"
+            return f"{size:.1f}{unit}"
+        size /= 1024.0
+    return f"{size:.1f}TB"
+
+
+def human_duration(seconds) -> str:
+    """73.4 -> '1m13s', 5.0 -> '5s', 3661 -> '1h1m1s'."""
+    if seconds is None:
+        return "n/a"
+    total = int(round(seconds))
+    if total < 0:
+        total = 0
+    h, rem = divmod(total, 3600)
+    m, s = divmod(rem, 60)
+    parts = []
+    if h:
+        parts.append(f"{h}h")
+    if m or h:
+        parts.append(f"{m}m")
+    parts.append(f"{s}s")
+    return "".join(parts)
+
+
 # --------------------------------------------------------------------------- #
 # Snapshot data
 # --------------------------------------------------------------------------- #
@@ -171,6 +206,8 @@ class FeedWatcher:
         self.out_dir = Path(args.out_dir)
         self.keep_snapshots = args.keep_snapshots
         self.max_snapshots = args.max_snapshots
+        self.verbose = args.verbose
+        self.log_file = Path(args.log_file) if args.log_file else None
 
         self.snap_dir = self.out_dir / "snapshots"
         self.latest_path = self.out_dir / "latest_copy.txt"
@@ -181,33 +218,73 @@ class FeedWatcher:
         self.prev_change_at = None       # type: datetime | None
         self.intervals = []              # seconds between detected changes
         self.change_count = 0
+        self.poll_count = 0
+
+    # ----- console + persistent log -------------------------------------- #
+    def say(self, line: str = "") -> None:
+        """Print to console AND append to the rolling log file (if enabled)."""
+        print(line)
+        if self.log_file is not None:
+            try:
+                self.log_file.parent.mkdir(parents=True, exist_ok=True)
+                with open(self.log_file, "a", encoding="utf-8") as fh:
+                    fh.write(line + "\n")
+            except OSError as exc:
+                # Never let logging break the watch loop.
+                print(f"[WARN] could not write log file: {exc!r}", file=sys.stderr)
 
     # ----- one poll cycle ------------------------------------------------- #
-    def poll_once(self) -> None:
-        """Stat the original cheaply, copy locally, inspect the copy."""
+    def poll_once(self) -> dict:
+        """Stat the original cheaply, copy locally, inspect the copy.
+
+        Returns a result dict describing what happened this poll so the caller
+        can render a heartbeat or a change banner.
+        """
+        self.poll_count += 1
+
         # 1) Cheap metadata read of the ORIGINAL (no content open).
         st = self.source.stat()  # raises if missing/unreachable -> caught upstream
         size = st.st_size
         mtime = st.st_mtime
-
         observed_at = now_local()
 
-        # 2) Copy to the local "latest" file (quick open/read/close).
-        #    We always refresh latest_copy.txt so inspection never touches origin.
+        # 2) Fast path: if stat (size + mtime) is identical to the last
+        #    snapshot, the content cannot have changed -> skip copy + hash.
+        if (
+            self.prev is not None
+            and size == self.prev.size
+            and int(mtime) == int(self.prev.mtime)
+        ):
+            return {
+                "status": "nochange",
+                "reason": "stat unchanged (skipped copy)",
+                "observed_at": observed_at,
+                "size": size,
+                "mtime": mtime,
+            }
+
+        # 3) Copy to the local "latest" file (quick open/read/close), then
+        #    inspect the LOCAL copy -- never the original.
         safe_copy(self.source, self.latest_path)
-
-        # 3) Inspect the LOCAL copy.
         sha256, line_count = hash_and_count(self.latest_path)
-
         current = Snapshot(size, mtime, sha256, line_count, observed_at)
 
         if not current.differs_from(self.prev):
-            # No change; nothing to log. (Quiet to keep console readable.)
-            return
+            # Stat moved but content is byte-identical (e.g. touched mtime).
+            self.prev = current
+            return {
+                "status": "nochange",
+                "reason": "copied+hashed, content identical",
+                "observed_at": observed_at,
+                "size": size,
+                "mtime": mtime,
+            }
 
         # ---- A change (or the first baseline) was detected ---------------- #
         is_baseline = self.prev is None
+        prev_snap = self.prev
         seconds_since_prev = ""
+        delta = None
         if self.prev_change_at is not None:
             delta = (observed_at - self.prev_change_at).total_seconds()
             seconds_since_prev = f"{delta:.1f}"
@@ -239,47 +316,103 @@ class FeedWatcher:
             ],
         )
 
-        # Console summary.
-        if is_baseline:
-            print(
-                f"[BASELINE] {iso_local(observed_at)}  "
-                f"size={size}B  lines={line_count}  sha={sha256[:12]}"
-            )
-        else:
+        if not is_baseline:
             self.change_count += 1
-            delta_str = (
-                f"{seconds_since_prev}s "
-                f"(~{float(seconds_since_prev) / 60:.1f} min)"
-                if seconds_since_prev
-                else "n/a"
-            )
-            print(
-                f"[CHANGE #{self.change_count}] {iso_local(observed_at)}  "
-                f"size={size}B  lines={line_count}  sha={sha256[:12]}  "
-                f"since_prev={delta_str}"
-            )
 
         self.prev = current
         self.prev_change_at = observed_at
 
+        return {
+            "status": "baseline" if is_baseline else "change",
+            "observed_at": observed_at,
+            "prev": prev_snap,
+            "current": current,
+            "delta": delta,
+            "change_n": self.change_count,
+        }
+
+    # ----- rendering ------------------------------------------------------ #
+    def _heartbeat(self, result: dict) -> str:
+        observed_at = result["observed_at"]
+        age = (
+            human_duration((observed_at - self.prev_change_at).total_seconds())
+            if self.prev_change_at is not None
+            else "n/a"
+        )
+        orig_mtime = hms(datetime.fromtimestamp(result["mtime"]).astimezone())
+        line = (
+            f"[poll #{self.poll_count}  {hms(observed_at)}] no change | "
+            f"age={age} since last change | "
+            f"orig mtime={orig_mtime} size={human_size(result['size'])} | "
+            f"next poll in {self.interval:g}s"
+        )
+        if self.verbose:
+            line += f"  ({result['reason']})"
+        return line
+
+    def _change_banner(self, result: dict) -> str:
+        observed_at = result["observed_at"]
+        cur = result["current"]
+        prev = result["prev"]
+        baseline = result["status"] == "baseline"
+        bar = "=" * 64
+        title = (
+            ">>> BASELINE <<<"
+            if baseline
+            else f">>> CHANGE #{result['change_n']} <<<"
+        )
+        lines = [bar, f"{title}  {iso_local(observed_at)}"]
+        if result["delta"] is not None:
+            lines.append(
+                f"  delta since prev change : "
+                f"{human_duration(result['delta'])} ({result['delta']:.1f}s)"
+            )
+        old_size = human_size(prev.size) if prev else "--"
+        old_mtime = (
+            hms(datetime.fromtimestamp(prev.mtime).astimezone()) if prev else "--"
+        )
+        old_sha = prev.sha256[:12] if prev else "--"
+        new_mtime = hms(datetime.fromtimestamp(cur.mtime).astimezone())
+        lines.append(f"  size   : {old_size} -> {human_size(cur.size)}")
+        lines.append(f"  mtime  : {old_mtime} -> {new_mtime}")
+        lines.append(f"  sha256 : {old_sha} -> {cur.sha256[:12]}")
+        lines.append(f"  lines  : {cur.line_count}")
+        lines.append(bar)
+        return "\n".join(lines)
+
+    def _startup_banner(self) -> str:
+        bar = "=" * 64
+        snap = "on" if self.keep_snapshots else "off"
+        if self.keep_snapshots and self.max_snapshots:
+            snap += f" (ring buffer {self.max_snapshots})"
+        lines = [
+            bar,
+            "FEED WATCHER - Caterpillar ERP order-feed cadence check",
+            bar,
+            f"  source     : {self.source}",
+            f"  interval   : {self.interval:g}s",
+            f"  out-dir    : {self.out_dir}",
+            f"  snapshots  : {snap}",
+            f"  heartbeats : {'on (verbose)' if self.verbose else 'off (quiet)'}",
+            f"  change CSV : {self.csv_path}",
+            f"  log file   : {self.log_file if self.log_file else '(none)'}",
+            bar,
+            "watching... (Ctrl+C to stop)",
+        ]
+        return "\n".join(lines)
+
     # ----- main loop ------------------------------------------------------ #
     def run(self) -> int:
         ensure_csv_header(self.csv_path)
-        print(
-            f"Watching: {self.source}\n"
-            f"Interval: {self.interval}s   Out: {self.out_dir}\n"
-            f"Snapshots: {'on' if self.keep_snapshots else 'off'}"
-            + (
-                f" (ring buffer {self.max_snapshots})"
-                if self.keep_snapshots and self.max_snapshots
-                else ""
-            )
-            + "\nPress Ctrl+C to stop.\n"
-        )
+        self.say(self._startup_banner())
         try:
             while True:
                 try:
-                    self.poll_once()
+                    result = self.poll_once()
+                    if result["status"] in ("change", "baseline"):
+                        self.say(self._change_banner(result))
+                    elif self.verbose:
+                        self.say(self._heartbeat(result))
                 except FileNotFoundError:
                     log_error(
                         self.errors_path,
@@ -303,21 +436,22 @@ class FeedWatcher:
 
     # ----- summary -------------------------------------------------------- #
     def shutdown_summary(self) -> None:
-        print("\n--- Shutdown summary ---")
-        print(f"Changes detected (excl. baseline): {self.change_count}")
+        self.say("\n--- Shutdown summary ---")
+        self.say(f"Polls run: {self.poll_count}")
+        self.say(f"Changes detected (excl. baseline): {self.change_count}")
         if self.intervals:
             mn = min(self.intervals)
             mx = max(self.intervals)
             med = statistics.median(self.intervals)
-            print(
+            self.say(
                 f"Interval between changes (s): "
                 f"min={mn:.1f}  median={med:.1f}  max={mx:.1f}  "
                 f"(median ~{med / 60:.1f} min)"
             )
         else:
-            print("No change intervals recorded yet.")
-        print(f"CSV log: {self.csv_path}")
-        print("------------------------")
+            self.say("No change intervals recorded yet.")
+        self.say(f"CSV log: {self.csv_path}")
+        self.say("------------------------")
 
 
 # --------------------------------------------------------------------------- #
@@ -366,6 +500,29 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=0,
         help="Ring-buffer cap on snapshot files (0 = unlimited).",
+    )
+    verb = p.add_mutually_exclusive_group()
+    verb.add_argument(
+        "-v",
+        "--verbose",
+        dest="verbose",
+        action="store_true",
+        help="Print a heartbeat status line on EVERY poll (default).",
+    )
+    verb.add_argument(
+        "--quiet",
+        dest="verbose",
+        action="store_false",
+        help="Suppress per-poll heartbeats; only show changes (old behavior).",
+    )
+    p.set_defaults(verbose=True)
+    p.add_argument(
+        "--log-file",
+        nargs="?",
+        const=str(Path(__file__).resolve().parent / "watcher.log"),
+        default=None,
+        help="Also append every console line (heartbeats + changes) to this "
+        "rolling text log. Bare flag defaults to scripts/feed_watcher/watcher.log.",
     )
     return p
 
