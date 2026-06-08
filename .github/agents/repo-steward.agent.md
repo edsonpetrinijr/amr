@@ -23,15 +23,16 @@ robotics1/
   maps/          # .smap / .task / map assets
   context/       # reference material (SDK docs, PDFs, demos) — read-only context
   docs/          # project documentation (see below)
+  docs/log/      # daily logs: one AAAA-MM-DD.md per day (Resumo do dia + timestamped Log). CEO-owned.
   .github/agents/ # the AI team
-  TIMELINE.md    # THE single project log (CEO-owned). Canonical. HISTORICO.md etc. are duplicates → merge into this.
+  TIMELINE.md    # index of the daily logs (one row per day → docs/log/AAAA-MM-DD.md). CEO-owned.
   README / config files (package.json, vite*, tsconfig, start.bat, .env, .gitignore)
 ```
 Loose strategy/analysis `.md` files at the root (ACTION_PLAN, COMPETITOR_ANALYSIS, PRICING_STUDY, Guidelines, CLAUDE, etc.) belong under **`docs/`** unless they are a tool-required root file. When in doubt about whether a root file is required by tooling, check before moving it.
 
 ## Canonical-file rules (deduplication)
 - **One source of truth per topic.** If two files cover the same thing, pick the canonical one, **merge** the unique content from the other into it, then delete the loser. Never lose information — fold it in first.
-- **Known canonicals:** project history → `TIMELINE.md` (NOT HISTORICO.md). If both exist, merge HISTORICO.md into TIMELINE.md and remove HISTORICO.md.
+- **Known canonicals:** the running project log = **daily files in `docs/log/`** indexed by `TIMELINE.md`; deeper narrative background = `docs/PROJECT_HISTORY.md`. Don't let a monolithic `TIMELINE.md` or a `HISTORICO.md` reappear — fold any such content into the right daily log / PROJECT_HISTORY.md and keep `TIMELINE.md` as a thin index.
 - **Tie-breakers when the canonical isn't obvious, in order:** (1) the one referenced by other files/tools/code, (2) the more complete/recent one, (3) the better-named one per convention. If still unclear or content genuinely conflicts, ASK before deleting.
 
 ## Approach

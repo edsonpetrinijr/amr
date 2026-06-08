@@ -62,8 +62,8 @@ so building is fast and parallel instead of one-at-a-time.
 
 ## Daily routines (slash commands)
 Run these from chat as prompts (type `/` in the chat box). Both run as the CEO.
-- **`/morning-routine`** — start of day: catch up via `TIMELINE.md` + git log, orient, surface the backlog, and agree on ONE focus. Read-only.
-- **`/end-of-day-routine`** — end of day: review what got done, append a dated entry to `TIMELINE.md`, tidy via `repo-steward`, commit and **push** everything, and tee up tomorrow.
+- **`/morning-routine`** — start of day: catch up via the recent daily logs in `docs/log/` + git log, orient, surface the backlog, and agree on ONE focus. Read-only.
+- **`/end-of-day-routine`** — end of day: review what got done, write today's `docs/log/AAAA-MM-DD.md` (Resumo do dia + timestamped Log) and update the `TIMELINE.md` index, tidy via `repo-steward`, commit and **push** everything, and tee up tomorrow.
 
 Prompt files live in `.github/prompts/`.
 
@@ -76,6 +76,6 @@ Prompt files live in `.github/prompts/`.
 ## Notes
 - **Engineers** (`eng-lead`'s pod) and **CTO** have `edit` + `execute` (write code, use git). **Repo Steward** has them too (moves/merges files via git). **CEO** has `edit` for docs only (timeline/context), never the codebase.
 - The **`agent`** tool (delegation) is held by the **CEO** (delegates to everyone) and the **Engineering Lead** (delegates to the engineer pod).
-- The CEO maintains **`TIMELINE.md`** (repo root) so you can follow everything that's been done — newest entry on top.
+- The CEO maintains the project log as **one file per day in `docs/log/`**, indexed by **`TIMELINE.md`** (repo root) — each day has a quick **Resumo** + a timestamped **Log**, newest day on top.
 - The engineers **commit to git constantly** — small, frequent, scoped commits on `main`, each in its own lane.
 - These are advisors/doers, not autopilots — they surface decisions; you decide.

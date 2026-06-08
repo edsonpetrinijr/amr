@@ -8,9 +8,9 @@ You are running the founder's **start-of-day routine**. Be the CEO/chief-of-staf
 
 Do this, in order:
 
-1. **Catch up.** Read `TIMELINE.md` (the running log at top + recent entries). Skim `git --no-pager log --oneline -10` to see what landed recently. If there are uncommitted changes (`git --no-pager status --short`), note them.
-2. **Orient.** In 3–5 bullets, summarize **where the project stands right now** — what was just done, what's in flight, and any open thread from the last "Next" entries in the timeline.
-3. **Surface what's pending.** Pull the open follow-ups / "Next" items from the timeline and any obvious loose ends (e.g., the "app won't open" issue, `1007.task` dispatch, guessed OPC UA node IDs). List them as a short backlog.
+1. **Catch up.** Open the most recent daily logs in `docs/log/` (the last 1–2 files, e.g. yesterday's `docs/log/AAAA-MM-DD.md`) — read its **Resumo do dia** (especially **Próximo**) and the tail of its **Log**. Use `TIMELINE.md` (the index table) to see the day list. Skim `git --no-pager log --oneline -10` for what landed. If there are uncommitted changes (`git --no-pager status --short`), note them.
+2. **Orient.** In 3–5 bullets, summarize **where the project stands right now** — what was just done, what's in flight, and any open thread from the last **Próximo** items in the most recent daily logs.
+3. **Surface what's pending.** Pull the open follow-ups / **Próximo** items from the recent daily logs and any obvious loose ends (e.g., the "app won't open" issue, `1007.task` dispatch, guessed OPC UA node IDs). List them as a short backlog.
 4. **Propose today's focus.** Recommend the **ONE most important thing** to move today and why (tie it to pilot success / runway / unblocking). Offer 2–3 secondary candidates. If the founder gave input above, weave it in.
 5. **Confirm the plan.** End by asking the founder to confirm or adjust the focus, then note which agent(s) you'd delegate each item to.
 
