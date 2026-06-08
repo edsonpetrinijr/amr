@@ -50,8 +50,7 @@ function RobotPanel({ robot, landmarks, onClose }: { robot: Robot; landmarks: La
     setSending(true)
     try {
       const res = await fleetApi.navigateToLandmark(robot.id, landmarkId)
-      toast.success('Navegando', { description: `${res.robot_id} → ${res.landmark_id}` })
-    } catch (e) {
+      toast.success('Navegando', { description: `${res.robot_id} → ${res.landmark_id}` })    } catch (e) {
       if (e instanceof FleetApiError) {
         if (e.status === 409)      toast.error('Navegação recusada', { description: e.message })
         else if (e.status === 404) toast.error('Não encontrado', { description: e.message })
@@ -74,32 +73,32 @@ function RobotPanel({ robot, landmarks, onClose }: { robot: Robot; landmarks: La
         <Badge variant={STATUS_VARIANT[robot.status] ?? 'outline'} className="justify-self-end">
           {robot.status.replace('_', ' ')}
         </Badge>
-        <span className="text-[#8b949e]">Battery</span>
+        <span className="text-[#8b949e]">Bateria</span>
         <span className={`${battColor} font-mono`}>{robot.battery}%</span>
-        <span className="text-[#8b949e]">Position</span>
+        <span className="text-[#8b949e]">Posição</span>
         <span className="text-[#c9d1d9] font-mono text-[10px]">({robot.x.toFixed(1)}, {robot.y.toFixed(1)})</span>
-        <span className="text-[#8b949e]">Task</span>
+        <span className="text-[#8b949e]">Tarefa</span>
         <span className="text-[#c9d1d9] font-mono">{robot.current_task ?? '—'}</span>
       </div>
 
       {/* Send to landmark */}
       <div className="border-t border-[#30363d] pt-3">
-        <p className="text-xs text-[#8b949e] mb-2">Send to landmark</p>
+        <p className="text-xs text-[#8b949e] mb-2">Enviar para marco</p>
         <select className="w-full text-xs bg-[#0d1117] border border-[#30363d] text-[#c9d1d9] rounded px-2 py-1 mb-2"
           value={landmarkId} onChange={e => setLandmarkId(e.target.value)}>
-          <option value="">— select landmark —</option>
+          <option value="">— selecione um marco —</option>
           {landmarks.map(lm => <option key={lm.id} value={lm.id}>{lm.id}</option>)}
         </select>
         <Button variant="primary" size="sm" className="w-full"
           disabled={!landmarkId || sending || robot.status === 'offline'}
           onClick={handleNavigate}>
-          {sending ? 'Sending…' : 'Navigate'}
+          {sending ? 'Enviando…' : 'Navegar'}
         </Button>
       </div>
 
       {/* Manual jog D-pad */}
       <div className="border-t border-[#30363d] pt-3">
-        <p className="text-xs text-[#8b949e] mb-1">Manual jog</p>
+        <p className="text-xs text-[#8b949e] mb-1">Controle manual</p>
         <p className="text-[10px] text-[#6e7681] mb-2">
           <span className="text-[#c9d1d9] font-mono">WASD</span> para mover,
           {' '}<span className="text-[#c9d1d9] font-mono">Q/E</span> girar.
@@ -147,31 +146,45 @@ function RobotPanel({ robot, landmarks, onClose }: { robot: Robot; landmarks: La
       {robot.current_task && (
         <Button variant="outline" size="sm" className="border-red-700 text-red-400 hover:bg-red-900/20"
           onClick={() => fleetApi.cancelTask(robot.current_task!)}>
-          Cancel task
+          Cancelar tarefa
         </Button>
       )}
     </aside>
   )
 }
 
-function StationPanel({ station, robots, onClose }:
+function StationPanel({ station, onClose }:
   { station: Station; robots: Robot[]; onClose: () => void }) {
-  const [robotId, setRobotId] = useState('')
   const [sending, setSending] = useState(false)
-  const available = robots.filter(r => r.status === 'idle' && !r.current_task)
 
-  async function handleDispatch() {
-    if (!robotId) return
-    setSending(true)
-    try { await fleetApi.createTask(robotId, station.id) }
-    catch (e) { console.error(e) }
-    finally { setSending(false) }
-  }
+  // NOTE: "Dispatch robot here" is hidden for the demo — see POST_DEMO_BACKLOG.md.
+  // handleDispatch passed the robot id as the pickup station, producing a malformed
+  // task (there is no backend contract to pin a task to a specific robot). The control
+  // and its handler/state are commented out (not deleted) until a proper endpoint exists.
+  //
+  // const [robotId, setRobotId] = useState('')
+  // const available = robots.filter(r => r.status === 'idle' && !r.current_task)
+  // async function handleDispatch() {
+  //   if (!robotId) return
+  //   setSending(true)
+  //   try { await fleetApi.createTask(robotId, station.id) }
+  //   catch (e) {
+  //     console.error(e)
+  //     toast.error('Falha ao enviar comando ao robô')
+  //   }
+  //   finally { setSending(false) }
+  // }
 
   async function handleCallbutton() {
     setSending(true)
-    try { await fleetApi.callbuttonPress(station.id) }
-    catch (e) { console.error(e) }
+    try {
+      await fleetApi.pressCallbutton(station.id)
+      toast.success('Botão de chamada acionado', { description: station.label })
+    } catch (e) {
+      console.error(e)
+      if (e instanceof FleetApiError) toast.error('Falha ao simular acionamento', { description: e.message })
+      else                           toast.error('Falha ao simular acionamento', { description: 'Backend inacessível' })
+    }
     finally { setSending(false) }
   }
 
@@ -182,12 +195,12 @@ function StationPanel({ station, robots, onClose }:
         <button onClick={onClose} className="text-[#8b949e] hover:text-[#c9d1d9] text-xs">✕</button>
       </div>
       <div className="grid grid-cols-2 gap-2 text-xs">
-        <span className="text-[#8b949e]">Type</span>
+        <span className="text-[#8b949e]">Tipo</span>
         <span className="text-[#c9d1d9] capitalize">{station.type}</span>
         <span className="text-[#8b949e]">AP ID</span>
         <span className="text-[#c9d1d9] font-mono">{station.ap_id ?? '—'}</span>
         {station.type === 'callbutton' && <>
-          <span className="text-[#8b949e]">State</span>
+          <span className="text-[#8b949e]">Estado</span>
           <Badge variant={station.cb_state === 'called' ? 'default' : 'outline'} className="justify-self-end">
             {station.cb_state}
           </Badge>
@@ -196,23 +209,26 @@ function StationPanel({ station, robots, onClose }:
       {station.type === 'callbutton' && (
         <Button variant="primary" size="sm" disabled={sending || station.cb_state === 'called'}
           onClick={handleCallbutton}>
-          Simulate press
+          Simular acionamento
         </Button>
       )}
+      {/* "Dispatch robot here" hidden for the demo — malformed task contract.
+          See POST_DEMO_BACKLOG.md. Re-enable once a robot-pinned task endpoint exists.
       {station.type !== 'base' && (
         <div className="border-t border-[#30363d] pt-3">
-          <p className="text-xs text-[#8b949e] mb-2">Dispatch robot here</p>
+          <p className="text-xs text-[#8b949e] mb-2">Despachar robô para cá</p>
           <select className="w-full text-xs bg-[#0d1117] border border-[#30363d] text-[#c9d1d9] rounded px-2 py-1 mb-2"
             value={robotId} onChange={e => setRobotId(e.target.value)}>
-            <option value="">— select robot —</option>
+            <option value="">— selecione um robô —</option>
             {available.map(r => <option key={r.id} value={r.id}>{r.id}</option>)}
           </select>
           <Button variant="primary" size="sm" className="w-full"
             disabled={!robotId || sending} onClick={handleDispatch}>
-            {sending ? 'Sending…' : 'Dispatch'}
+            {sending ? 'Enviando…' : 'Despachar'}
           </Button>
         </div>
       )}
+      */}
     </aside>
   )
 }
@@ -268,9 +284,9 @@ export function Field() {
       {/* Header */}
       <div className="border-b border-[#30363d] px-6 py-3 flex items-center gap-3 flex-shrink-0">
         <Map className="w-4 h-4 text-[#58a6ff]" />
-        <h1 className="text-sm font-semibold text-[#e6edf3]">Field View</h1>
+        <h1 className="text-sm font-semibold text-[#e6edf3]">Vista de Campo</h1>
         <div className={`w-2 h-2 rounded-full ml-2 ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
-        <span className="text-xs text-[#8b949e]">{connected ? 'Live' : 'Disconnected'}</span>
+        <span className="text-xs text-[#8b949e]">{connected ? 'Ao vivo' : 'Desconectado'}</span>
         <div className="ml-auto flex items-center gap-2 text-xs text-[#8b949e]">
           {/* 2D / 3D toggle */}
           <div className="flex items-center rounded border border-[#30363d] overflow-hidden">
@@ -311,11 +327,11 @@ export function Field() {
             className={`flex items-center gap-1.5 px-2 py-1 rounded border transition-colors
               ${show3DPanel ? 'border-[#58a6ff] text-[#58a6ff] bg-[#58a6ff]/10' : 'border-[#30363d] hover:bg-[#161b22]'}`}>
             <Box className="w-3.5 h-3.5" />
-            3D Panel
+            Painel 3D
           </button>
-          <span>{robots.length} robots</span>
+          <span>{robots.length} robôs</span>
           <span>·</span>
-          <span>{stations.length} stations</span>
+          <span>{stations.length} estações</span>
         </div>
       </div>
 
@@ -326,7 +342,7 @@ export function Field() {
             viewMode === '3d' ? (
               <Suspense fallback={
                 <div className="w-full h-full flex items-center justify-center text-[#8b949e] text-sm">
-                  Loading 3D scene…
+                  Carregando cena 3D…
                 </div>
               }>
                 <MapCanvas3D
@@ -352,7 +368,7 @@ export function Field() {
             )
           ) : (
             <div className="h-full flex items-center justify-center text-[#8b949e] text-sm">
-              {connected ? 'Loading map…' : 'Connecting to backend…'}
+              {connected ? 'Carregando mapa…' : 'Conectando ao backend…'}
             </div>
           )}
         </div>

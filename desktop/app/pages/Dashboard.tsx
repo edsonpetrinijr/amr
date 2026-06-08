@@ -25,13 +25,13 @@ const statusColor: Record<string, string> = {
 }
 
 const statusLabel: Record<string, string> = {
-  idle:           "Idle",
-  enroute_pickup: "En Route",
-  at_pickup:      "At Pickup",
-  enroute_drop:   "Delivering",
-  returning:      "Returning",
-  charging:       "Charging",
-  error:          "Error",
+  idle:           "Ocioso",
+  enroute_pickup: "A caminho",
+  at_pickup:      "Na coleta",
+  enroute_drop:   "Entregando",
+  returning:      "Retornando",
+  charging:       "Carregando",
+  error:          "Erro",
   offline:        "Offline",
 }
 
@@ -49,9 +49,9 @@ const taskStateColor: Record<string, string> = {
 function elapsed(ts: number | null) {
   if (!ts) return "—"
   const s = Math.floor((Date.now() / 1000) - ts)
-  if (s < 60)   return `${s}s ago`
-  if (s < 3600) return `${Math.floor(s / 60)} min ago`
-  return `${Math.floor(s / 3600)}h ago`
+  if (s < 60)   return `há ${s}s`
+  if (s < 3600) return `há ${Math.floor(s / 60)} min`
+  return `há ${Math.floor(s / 3600)}h`
 }
 
 export function Dashboard() {
@@ -93,23 +93,23 @@ export function Dashboard() {
       {/* Header */}
       <div className="flex justify-between items-start mb-8">
         <div>
-          <p className="text-xs font-mono text-[#8b949e] uppercase tracking-widest mb-1">Fleet Dashboard</p>
+          <p className="text-xs font-mono text-[#8b949e] uppercase tracking-widest mb-1">Painel da Frota</p>
           <h1 className="text-2xl font-bold text-[#e6edf3]">{facility.name}</h1>
           <p className="text-[#8b949e] text-sm mt-1">
-            AMR fleet overview · {connected ? "live" : "waiting for fleet…"}
+            Visão geral da frota AMR · {connected ? "ao vivo" : "aguardando frota…"}
           </p>
         </div>
         <div className="flex gap-3">
           <Link to="/field">
             <Button variant="outline" className="flex items-center gap-2">
               <Map className="w-4 h-4" />
-              Field View
+              Vista de Campo
             </Button>
           </Link>
           <Link to="/tasks">
             <Button variant="outline" className="flex items-center gap-2">
               <ListChecks className="w-4 h-4" />
-              All Tasks
+              Todas as Tarefas
             </Button>
           </Link>
         </div>
@@ -118,32 +118,32 @@ export function Dashboard() {
       {/* KPI row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <KpiCard label="Online"   value={online}   total={robots.length} color="#3fb950" icon={<Bot className="w-4 h-4" />} />
-        <KpiCard label="Active"   value={active}   total={online}        color="#58a6ff" icon={<ArrowRight className="w-4 h-4" />} />
-        <KpiCard label="Charging" value={charging} total={robots.length} color="#d29922" icon={<Battery className="w-4 h-4" />} />
-        <KpiCard label="Errors"   value={errors}   total={robots.length} color="#f85149" icon={<AlertTriangle className="w-4 h-4" />} />
+        <KpiCard label="Ativos"   value={active}   total={online}        color="#58a6ff" icon={<ArrowRight className="w-4 h-4" />} />
+        <KpiCard label="Carregando" value={charging} total={robots.length} color="#d29922" icon={<Battery className="w-4 h-4" />} />
+        <KpiCard label="Erros"    value={errors}   total={robots.length} color="#f85149" icon={<AlertTriangle className="w-4 h-4" />} />
       </div>
 
       {/* Analytics strip — /stats/summary */}
       <div className="mb-8">
         <div className="flex items-center justify-between mb-3">
-          <p className="text-[10px] font-mono text-[#8b949e] uppercase tracking-widest">Today's Analytics</p>
+          <p className="text-[10px] font-mono text-[#8b949e] uppercase tracking-widest">Análises de Hoje</p>
           {stats?.halted && (
             <span className="text-[10px] font-mono uppercase tracking-wide text-[#f85149] flex items-center gap-1">
-              <AlertTriangle className="w-3 h-3" /> Fleet halted
+              <AlertTriangle className="w-3 h-3" /> Frota parada
             </span>
           )}
         </div>
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-          <StatCard label="Completed Today" value={fmtNum(stats?.tasks_completed_today)} color="#3fb950"
+          <StatCard label="Concluídas Hoje" value={fmtNum(stats?.tasks_completed_today)} color="#3fb950"
             icon={<CheckCircle2 className="w-4 h-4" />} loading={!stats} error={statsError} />
-          <StatCard label="Failed Today" value={fmtNum(stats?.tasks_failed_today)} color="#f85149"
+          <StatCard label="Falhas Hoje" value={fmtNum(stats?.tasks_failed_today)} color="#f85149"
             icon={<XCircle className="w-4 h-4" />} loading={!stats} error={statsError} />
-          <StatCard label="Avg Duration" value={fmtDuration(stats?.avg_task_duration_s)} color="#58a6ff"
+          <StatCard label="Duração Média" value={fmtDuration(stats?.avg_task_duration_s)} color="#58a6ff"
             icon={<Timer className="w-4 h-4" />} loading={!stats} error={statsError} />
-          <StatCard label="Utilization" value={fmtPct(stats?.fleet_utilization)} color="#d29922"
+          <StatCard label="Utilização" value={fmtPct(stats?.fleet_utilization)} color="#d29922"
             icon={<Gauge className="w-4 h-4" />} loading={!stats} error={statsError}
-            sub={stats ? `${stats.fleet_active}/${stats.fleet_total} active` : undefined} />
-          <StatCard label="Avg Battery" value={stats?.avg_battery != null ? `${stats.avg_battery.toFixed(0)}%` : "—"} color="#3fb950"
+            sub={stats ? `${stats.fleet_active}/${stats.fleet_total} ativos` : undefined} />
+          <StatCard label="Bateria Média" value={stats?.avg_battery != null ? `${stats.avg_battery.toFixed(0)}%` : "—"} color="#3fb950"
             icon={<Battery className="w-4 h-4" />} loading={!stats} error={statsError} />
         </div>
       </div>
@@ -155,15 +155,15 @@ export function Dashboard() {
             <CardHeader className="flex flex-row items-center justify-between py-3">
               <CardTitle className="text-sm font-medium flex items-center gap-2">
                 <Bot className="w-4 h-4 text-[#8b949e]" />
-                Fleet ({robots.length} robots)
+                Frota ({robots.length} robôs)
               </CardTitle>
-              <Link to="/devices" className="text-xs text-[#58a6ff] hover:underline">Configure →</Link>
+              <Link to="/devices" className="text-xs text-[#58a6ff] hover:underline">Configurar →</Link>
             </CardHeader>
             <CardContent className="p-0">
               <div className="divide-y divide-[#30363d]">
                 {robots.length === 0 ? (
                   <div className="px-4 py-8 text-center text-xs text-[#8b949e]">
-                    {waiting ? "Waiting for fleet…" : "No robots connected"}
+                    {waiting ? "Aguardando frota…" : "Nenhum robô conectado"}
                   </div>
                 ) : robots.map(r => (
                   <div key={r.id} className="flex items-center justify-between px-4 py-3 hover:bg-[#21262d]/40 transition-colors">
@@ -198,15 +198,15 @@ export function Dashboard() {
             <CardHeader className="flex flex-row items-center justify-between py-3">
               <CardTitle className="text-sm font-medium flex items-center gap-2">
                 <ListChecks className="w-4 h-4 text-[#8b949e]" />
-                Recent Tasks
+                Tarefas Recentes
               </CardTitle>
-              <Link to="/tasks" className="text-xs text-[#58a6ff] hover:underline">All tasks →</Link>
+              <Link to="/tasks" className="text-xs text-[#58a6ff] hover:underline">Todas as tarefas →</Link>
             </CardHeader>
             <CardContent className="p-0">
               <div className="divide-y divide-[#30363d]">
                 {recentTasks.length === 0 ? (
                   <div className="px-4 py-8 text-center text-xs text-[#8b949e]">
-                    {waiting ? "Waiting for fleet…" : "No tasks yet"}
+                    {waiting ? "Aguardando frota…" : "Nenhuma tarefa ainda"}
                   </div>
                 ) : recentTasks.map((t: Task) => (
                   <div key={t.id} className="px-4 py-3 hover:bg-[#21262d]/40 transition-colors">
@@ -240,27 +240,27 @@ export function Dashboard() {
           {/* Quick actions */}
           <Card className="mt-6">
             <CardHeader className="py-3">
-              <CardTitle className="text-sm font-medium">Quick Actions</CardTitle>
+              <CardTitle className="text-sm font-medium">Ações Rápidas</CardTitle>
             </CardHeader>
             <CardContent className="p-4 grid grid-cols-2 gap-2">
               <Link to="/field">
                 <Button variant="outline" className="w-full justify-start text-xs font-mono h-8">
-                  <Map className="w-3 h-3 mr-2" /> Open Field View
+                  <Map className="w-3 h-3 mr-2" /> Abrir Vista de Campo
                 </Button>
               </Link>
               <Link to="/callbuttons">
                 <Button variant="outline" className="w-full justify-start text-xs font-mono h-8">
-                  <Bell className="w-3 h-3 mr-2" /> Call Buttons
+                  <Bell className="w-3 h-3 mr-2" /> Botões de Chamada
                 </Button>
               </Link>
               <Link to="/calibration">
                 <Button variant="outline" className="w-full justify-start text-xs font-mono h-8">
-                  <ArrowRight className="w-3 h-3 mr-2" /> Calibrate Robot
+                  <ArrowRight className="w-3 h-3 mr-2" /> Calibrar Robô
                 </Button>
               </Link>
               <Link to="/devices">
                 <Button variant="outline" className="w-full justify-start text-xs font-mono h-8">
-                  <Bot className="w-3 h-3 mr-2" /> Manage Devices
+                  <Bot className="w-3 h-3 mr-2" /> Gerenciar Dispositivos
                 </Button>
               </Link>
             </CardContent>

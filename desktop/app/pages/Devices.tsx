@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Cpu, Bot, MapPin, Bell, Zap, RefreshCw, Plus, Pencil, Trash2, Loader2, Wifi } from 'lucide-react'
+import { Cpu, Bot, MapPin, Bell, Zap, Plus, Pencil, Trash2, Loader2, Wifi } from 'lucide-react'
 import { useFleet } from '../state/store'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
@@ -59,7 +59,7 @@ function RobotsTab() {
       const res = await fleetApi.probeRobot(id)
       setProbeResults(p => ({ ...p, [id]: res }))
     } catch (e) {
-      setProbeErrors(p => ({ ...p, [id]: e instanceof FleetApiError ? e.message : 'Probe failed' }))
+      setProbeErrors(p => ({ ...p, [id]: e instanceof FleetApiError ? e.message : 'Falha na sondagem' }))
     } finally {
       setProbing(null)
     }
@@ -74,7 +74,7 @@ function RobotsTab() {
       refresh()
       setDeleteTarget(null)
     } catch (e) {
-      setDeleteError(e instanceof FleetApiError ? e.message : 'Delete failed')
+      setDeleteError(e instanceof FleetApiError ? e.message : 'Falha ao excluir')
     } finally {
       setDeleting(false)
     }
@@ -83,17 +83,17 @@ function RobotsTab() {
   return (
     <div className="overflow-auto">
       <div className="flex items-center justify-between px-4 py-3">
-        <span className="text-xs text-[#8b949e]">{robots.length} robots</span>
+        <span className="text-xs text-[#8b949e]">{robots.length} robôs</span>
         <Button variant="primary" size="sm" onClick={() => setAddOpen(true)}>
           <Plus className="w-3.5 h-3.5 mr-1" />
-          Add robot
+          Adicionar robô
         </Button>
       </div>
 
       <table className="w-full text-xs">
         <thead className="sticky top-0 bg-[#161b22] border-b border-[#30363d]">
           <tr className="text-[#8b949e]">
-            {['ID', 'Name', 'Model', 'IP', 'Conn', 'Status', 'Battery', 'Position', 'Last Seen', ''].map(h => (
+            {['ID', 'Nome', 'Modelo', 'IP', 'Conexão', 'Status', 'Bateria', 'Posição', 'Visto por último', ''].map(h => (
               <th key={h} className="px-4 py-2 text-left font-medium">{h}</th>
             ))}
           </tr>
@@ -120,16 +120,16 @@ function RobotsTab() {
                 <td className="px-4 py-2">
                   <div className="flex items-center gap-1 justify-end">
                     <Button variant="ghost" size="sm" onClick={() => handleProbe(r.id)} disabled={probing === r.id}
-                      title="Test / re-probe">
+                      title="Testar / sondar novamente">
                       {probing === r.id
                         ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
                         : <Wifi className="w-3.5 h-3.5" />}
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => setEditTarget(r)} title="Edit">
+                    <Button variant="ghost" size="sm" onClick={() => setEditTarget(r)} title="Editar">
                       <Pencil className="w-3.5 h-3.5" />
                     </Button>
                     <Button variant="ghost" size="sm" onClick={() => { setDeleteTarget(r); setDeleteError(null) }}
-                      title="Delete" className="hover:text-[#ff7b72]">
+                      title="Excluir" className="hover:text-[#ff7b72]">
                       <Trash2 className="w-3.5 h-3.5" />
                     </Button>
                   </div>
@@ -147,7 +147,7 @@ function RobotsTab() {
             </React.Fragment>
           ))}
           {robots.length === 0 && (
-            <tr><td colSpan={10} className="px-4 py-8 text-center text-[#8b949e]">No robots configured</td></tr>
+            <tr><td colSpan={10} className="px-4 py-8 text-center text-[#8b949e]">Nenhum robô configurado</td></tr>
           )}
         </tbody>
       </table>
@@ -161,18 +161,18 @@ function RobotsTab() {
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => { if (!o) setDeleteTarget(null) }}>
         <AlertDialogContent className="bg-[#161b22] border-[#30363d] text-[#e6edf3]">
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete {deleteTarget?.id}?</AlertDialogTitle>
+            <AlertDialogTitle>Excluir {deleteTarget?.id}?</AlertDialogTitle>
             <AlertDialogDescription className="text-[#8b949e]">
-              This removes the robot from the fleet. This cannot be undone.
+              Isso remove o robô da frota. Esta ação não pode ser desfeita.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {deleteError && <div className="text-xs text-[#ff7b72]">{deleteError}</div>}
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
             <AlertDialogAction onClick={(e) => { e.preventDefault(); handleDelete() }} disabled={deleting}
               className="bg-[#da3633] text-white hover:bg-[#f85149] border-[#f85149]/30">
               {deleting && <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />}
-              Delete
+              Excluir
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -195,8 +195,8 @@ function StationsTab({ type }: { type: 'callbutton' | 'base' | 'ap' }) {
   const isCb = type === 'callbutton'
 
   const headers = isCb
-    ? ['ID', 'Label', 'SEER LM', 'AP ID', 'OPC UA Node', 'Position', 'CB State', 'Test']
-    : ['ID', 'Label', 'SEER LM', 'AP ID', 'OPC UA Node', 'Position', 'Type']
+    ? ['ID', 'Rótulo', 'SEER LM', 'AP ID', 'Nó OPC UA', 'Posição', 'Estado CB', 'Teste']
+    : ['ID', 'Rótulo', 'SEER LM', 'AP ID', 'Nó OPC UA', 'Posição', 'Tipo']
 
   return (
     <div className="overflow-auto">
@@ -228,7 +228,7 @@ function StationsTab({ type }: { type: 'callbutton' | 'base' | 'ap' }) {
             </tr>
           ))}
           {filtered.length === 0 && (
-            <tr><td colSpan={headers.length} className="px-4 py-8 text-center text-[#8b949e]">No stations configured</td></tr>
+            <tr><td colSpan={headers.length} className="px-4 py-8 text-center text-[#8b949e]">Nenhuma estação configurada</td></tr>
           )}
         </tbody>
       </table>
@@ -242,23 +242,23 @@ function MapTab() {
   const { map } = useFleet()
   if (!map) return (
     <div className="flex items-center justify-center h-64 text-[#8b949e] text-sm">
-      No map loaded
+      Nenhum mapa carregado
     </div>
   )
   return (
     <div className="p-6 grid grid-cols-2 gap-4 text-xs max-w-2xl">
       {[
-        ['Name',       map.name],
-        ['Type',       map.map_type],
-        ['Version',    map.version],
-        ['Resolution', `${map.resolution} m/px`],
-        ['Extents X',  `${map.min_pos.x.toFixed(2)} → ${map.max_pos.x.toFixed(2)} m`],
-        ['Extents Y',  `${map.min_pos.y.toFixed(2)} → ${map.max_pos.y.toFixed(2)} m`],
-        ['Walls',      String(map.walls.length)],
-        ['Nav points', String(map.nav_points.length)],
-        ['Action pts', String(map.action_points.length)],
-        ['Landmarks',  String(map.landmarks.length)],
-        ['Areas',      String(map.areas.length)],
+        ['Nome',          map.name],
+        ['Tipo',          map.map_type],
+        ['Versão',        map.version],
+        ['Resolução',     `${map.resolution} m/px`],
+        ['Extensão X',    `${map.min_pos.x.toFixed(2)} → ${map.max_pos.x.toFixed(2)} m`],
+        ['Extensão Y',    `${map.min_pos.y.toFixed(2)} → ${map.max_pos.y.toFixed(2)} m`],
+        ['Paredes',       String(map.walls.length)],
+        ['Pontos de nav', String(map.nav_points.length)],
+        ['Pontos de ação',String(map.action_points.length)],
+        ['Marcos',        String(map.landmarks.length)],
+        ['Áreas',         String(map.areas.length)],
       ].map(([label, val]) => (
         <div key={label} className="flex gap-3 items-baseline">
           <span className="text-[#8b949e] w-32 flex-shrink-0">{label}</span>
@@ -274,11 +274,11 @@ function MapTab() {
 type TabId = 'robots' | 'callbuttons' | 'aps' | 'bases' | 'map'
 
 const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
-  { id: 'robots',      label: 'Robots',      icon: <Bot    className="w-4 h-4" /> },
-  { id: 'callbuttons', label: 'Call buttons', icon: <Bell   className="w-4 h-4" /> },
-  { id: 'aps',         label: 'Action points',icon: <MapPin className="w-4 h-4" /> },
-  { id: 'bases',       label: 'Bases / Charge',icon:<Zap   className="w-4 h-4" /> },
-  { id: 'map',         label: 'Map info',     icon: <Cpu    className="w-4 h-4" /> },
+  { id: 'robots',      label: 'Robôs',          icon: <Bot    className="w-4 h-4" /> },
+  { id: 'callbuttons', label: 'Botões de chamada', icon: <Bell   className="w-4 h-4" /> },
+  { id: 'aps',         label: 'Pontos de ação', icon: <MapPin className="w-4 h-4" /> },
+  { id: 'bases',       label: 'Bases / Carga',  icon:<Zap   className="w-4 h-4" /> },
+  { id: 'map',         label: 'Info do mapa',   icon: <Cpu    className="w-4 h-4" /> },
 ]
 
 export function Devices() {
@@ -290,17 +290,12 @@ export function Devices() {
       {/* Header */}
       <div className="border-b border-[#30363d] px-6 py-3 flex items-center gap-3 flex-shrink-0">
         <Cpu className="w-4 h-4 text-[#58a6ff]" />
-        <h1 className="text-sm font-semibold text-[#e6edf3]">Devices</h1>
+        <h1 className="text-sm font-semibold text-[#e6edf3]">Dispositivos</h1>
         <div className={`w-2 h-2 rounded-full ml-2 ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
         <span className="text-xs text-[#8b949e]">
-          {robots.length} robots · {stations.length} stations{map ? ` · ${map.name}` : ''}
+          {robots.length} robôs · {stations.length} estações{map ? ` · ${map.name}` : ''}
         </span>
-        <div className="ml-auto">
-          <Button variant="ghost" size="sm" onClick={() => window.location.reload()}>
-            <RefreshCw className="w-3.5 h-3.5 mr-1" />
-            Refresh
-          </Button>
-        </div>
+        {/* "Refresh" removed: fleet data is already live via SSE (no manual reload needed). */}
       </div>
 
       {/* Tab bar */}
