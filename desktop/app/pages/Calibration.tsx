@@ -8,6 +8,7 @@ import { useJog, type JogDir } from '../hooks/useJog'
 import { MapCanvas } from '../components/MapCanvas'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
+import { PageHeader } from '@/app/components/PageHeader'
 import type { Robot, RelocalizeSuggestion, RelocalizeSuggestionsResponse } from '../api/types'
 
 // ── Jog panel ─────────────────────────────────────────────────────────────────
@@ -278,26 +279,25 @@ export function Calibration() {
   return (
     <div className="flex-1 flex flex-col bg-[#0d1117]">
       {/* Header */}
-      <div className="border-b border-[#30363d] px-6 py-3 flex items-center gap-3 flex-shrink-0">
-        <Wrench className="w-4 h-4 text-[#58a6ff]" />
-        <h1 className="text-sm font-semibold text-[#e6edf3]">Calibração</h1>
-        <div className={`w-2 h-2 rounded-full ml-2 ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
-        {robot && (
-          <Badge variant="secondary" className="ml-1">{robot.id}</Badge>
-        )}
-        <div className="ml-auto flex gap-2">
-          {/* Robot selector */}
-          {robots.map(r => (
-            <Link key={r.id} to={`/calibration/${r.id}`}
-              className={`text-xs px-2 py-1 rounded transition-colors
-                ${r.id === robot?.id
-                  ? 'bg-[#21262d] text-[#e6edf3] border border-[#58a6ff]'
-                  : 'text-[#8b949e] hover:text-[#c9d1d9] hover:bg-[#161b22]'}`}>
-              {r.id}
-            </Link>
-          ))}
-        </div>
-      </div>
+      <PageHeader
+        icon={<Wrench className="w-4 h-4 text-[#58a6ff]" />}
+        title="Calibração"
+        status={
+          <span className="ml-1 flex items-center gap-2">
+            <span className={`w-2 h-2 rounded-full ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
+            {robot && <Badge variant="secondary" className="ml-1">{robot.id}</Badge>}
+          </span>
+        }
+        actions={robots.map(r => (
+          <Link key={r.id} to={`/calibration/${r.id}`}
+            className={`text-xs px-2 py-1 rounded transition-colors
+              ${r.id === robot?.id
+                ? 'bg-[#21262d] text-[#e6edf3] border border-[#58a6ff]'
+                : 'text-[#8b949e] hover:text-[#c9d1d9] hover:bg-[#161b22]'}`}>
+            {r.id}
+          </Link>
+        ))}
+      />
 
       {!robot ? (
         <div className="flex-1 flex items-center justify-center text-[#8b949e] text-sm">

@@ -2,9 +2,10 @@ import React, { useEffect, useState } from "react"
 import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/card"
 import { Badge } from "../components/ui/badge"
 import { Button } from "../components/ui/button"
-import { Map, ListChecks, Bell, Battery, Bot, AlertTriangle, CheckCircle2, Clock, ArrowRight, XCircle, Gauge, Timer } from "lucide-react"
+import { Map, ListChecks, Bell, Battery, Bot, AlertTriangle, CheckCircle2, Clock, ArrowRight, XCircle, Gauge, Timer, LayoutDashboard } from "lucide-react"
 import { Link } from "react-router"
 import { cn } from "@/app/utils"
+import { PageHeader } from "@/app/components/PageHeader"
 import { useFleet } from "../state/store"
 import { fleetApi } from "../api/fleet"
 import type { Station, Task, StatsSummary } from "../api/types"
@@ -89,32 +90,36 @@ export function Dashboard() {
   const waiting = !connected && robots.length === 0
 
   return (
-    <div className="flex-1 overflow-auto bg-[#0d1117] p-8">
-      {/* Header */}
-      <div className="flex justify-between items-start mb-8">
-        <div>
-          <p className="text-xs font-mono text-[#8b949e] uppercase tracking-widest mb-1">Painel da Frota</p>
-          <h1 className="text-2xl font-bold text-[#e6edf3]">{facility.name}</h1>
-          <p className="text-[#8b949e] text-sm mt-1">
-            Visão geral da frota AMR · {connected ? "ao vivo" : "aguardando frota…"}
-          </p>
-        </div>
-        <div className="flex gap-3">
-          <Link to="/field">
-            <Button variant="outline" className="flex items-center gap-2">
-              <Map className="w-4 h-4" />
-              Vista de Campo
-            </Button>
-          </Link>
-          <Link to="/tasks">
-            <Button variant="outline" className="flex items-center gap-2">
-              <ListChecks className="w-4 h-4" />
-              Todas as Tarefas
-            </Button>
-          </Link>
-        </div>
-      </div>
+    <div className="flex-1 flex flex-col bg-[#0d1117]">
+      <PageHeader
+        icon={<LayoutDashboard className="w-4 h-4 text-[#58a6ff]" />}
+        title="Painel da Frota"
+        status={
+          <span className="ml-1 flex items-center gap-2 text-xs text-[#8b949e]">
+            <span className="font-mono text-[#c9d1d9]">{facility.name}</span>
+            <span>·</span>
+            <span>{connected ? "ao vivo" : "aguardando frota…"}</span>
+          </span>
+        }
+        actions={
+          <>
+            <Link to="/field">
+              <Button variant="outline" size="sm" className="flex items-center gap-2">
+                <Map className="w-4 h-4" />
+                Vista de Campo
+              </Button>
+            </Link>
+            <Link to="/tasks">
+              <Button variant="outline" size="sm" className="flex items-center gap-2">
+                <ListChecks className="w-4 h-4" />
+                Todas as Tarefas
+              </Button>
+            </Link>
+          </>
+        }
+      />
 
+      <div className="flex-1 overflow-auto p-8">
       {/* KPI row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <KpiCard label="Online"   value={online}   total={robots.length} color="#3fb950" icon={<Bot className="w-4 h-4" />} />
@@ -266,6 +271,7 @@ export function Dashboard() {
             </CardContent>
           </Card>
         </div>
+      </div>
       </div>
     </div>
   )

@@ -5,6 +5,7 @@ import { useFleet } from '../state/store'
 import { fleetApi } from '../api/fleet'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
+import { PageHeader } from '@/app/components/PageHeader'
 import type { Task } from '../api/types'
 
 const STATE_VARIANT: Record<string, 'success' | 'destructive' | 'default' | 'secondary' | 'outline'> = {
@@ -92,32 +93,31 @@ export function Tasks() {
   return (
     <div className="flex-1 flex flex-col bg-[#0d1117]">
       {/* Header */}
-      <div className="border-b border-[#30363d] px-6 py-3 flex items-center gap-3 flex-shrink-0">
-        <ListChecks className="w-4 h-4 text-[#58a6ff]" />
-        <h1 className="text-sm font-semibold text-[#e6edf3]">Tarefas</h1>
-        <div className={`w-2 h-2 rounded-full ml-2 ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
-        <span className="text-xs text-[#8b949e]">{allTasks.length} no total</span>
-
-        {/* Filter tabs */}
-        <div className="ml-4 flex gap-1">
-          {(['all', 'active', 'done'] as const).map(f => (
-            <button key={f} onClick={() => setFilter(f)}
-              className={`px-2 py-0.5 rounded text-xs transition-colors ${
-                filter === f
-                  ? 'bg-[#21262d] text-[#e6edf3] border border-[#58a6ff]'
-                  : 'text-[#8b949e] hover:text-[#c9d1d9]'}`}>
-              {f === 'all' ? 'Todas' : f === 'active' ? 'Ativas' : 'Concluídas'}
-            </button>
-          ))}
-        </div>
-
-        <div className="ml-auto">
+      <PageHeader
+        icon={<ListChecks className="w-4 h-4 text-[#58a6ff]" />}
+        title="Tarefas"
+        status={
+          <span className="ml-1 flex items-center gap-2">
+            <span className={`w-2 h-2 rounded-full ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
+            <span className="text-xs text-[#8b949e]">{allTasks.length} no total</span>
+          </span>
+        }
+        actions={
           <Button variant="primary" size="sm" onClick={() => setShowForm(v => !v)}>
             <Plus className="w-3.5 h-3.5 mr-1" />
             Nova tarefa
           </Button>
-        </div>
-      </div>
+        }
+        subBar={(['all', 'active', 'done'] as const).map(f => (
+          <button key={f} onClick={() => setFilter(f)}
+            className={`px-2 py-1 rounded text-xs transition-colors ${
+              filter === f
+                ? 'bg-[#21262d] text-[#e6edf3] border border-[#58a6ff]'
+                : 'text-[#8b949e] hover:text-[#c9d1d9]'}`}>
+            {f === 'all' ? 'Todas' : f === 'active' ? 'Ativas' : 'Concluídas'}
+          </button>
+        ))}
+      />
 
       {/* Create form */}
       {showForm && (

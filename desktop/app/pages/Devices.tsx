@@ -10,6 +10,7 @@ import {
 import { RobotEditDialog } from '../components/RobotEditDialog'
 import { PulledInfo } from '../components/PulledInfo'
 import { CallbuttonStationRow } from '../components/CallbuttonStationRow'
+import { PageHeader } from '@/app/components/PageHeader'
 import { fleetApi, FleetApiError } from '../api/fleet'
 import type { Robot, ProbeResult } from '../api/types'
 
@@ -288,19 +289,18 @@ export function Devices() {
   return (
     <div className="flex-1 flex flex-col bg-[#0d1117]">
       {/* Header */}
-      <div className="border-b border-[#30363d] px-6 py-3 flex items-center gap-3 flex-shrink-0">
-        <Cpu className="w-4 h-4 text-[#58a6ff]" />
-        <h1 className="text-sm font-semibold text-[#e6edf3]">Dispositivos</h1>
-        <div className={`w-2 h-2 rounded-full ml-2 ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
-        <span className="text-xs text-[#8b949e]">
-          {robots.length} robôs · {stations.length} estações{map ? ` · ${map.name}` : ''}
-        </span>
-        {/* "Refresh" removed: fleet data is already live via SSE (no manual reload needed). */}
-      </div>
-
-      {/* Tab bar */}
-      <div className="flex border-b border-[#30363d] px-4 gap-1 flex-shrink-0 bg-[#0d1117]">
-        {TABS.map(t => (
+      <PageHeader
+        icon={<Cpu className="w-4 h-4 text-[#58a6ff]" />}
+        title="Dispositivos"
+        status={
+          <span className="ml-1 flex items-center gap-2">
+            <span className={`w-2 h-2 rounded-full ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
+            <span className="text-xs text-[#8b949e]">
+              {robots.length} robôs · {stations.length} estações{map ? ` · ${map.name}` : ''}
+            </span>
+          </span>
+        }
+        subBar={TABS.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
             className={`flex items-center gap-1.5 px-3 py-2 text-xs transition-colors border-b-2 -mb-px
               ${tab === t.id
@@ -310,7 +310,7 @@ export function Devices() {
             {t.label}
           </button>
         ))}
-      </div>
+      />
 
       {/* Tab content */}
       <div className="flex-1 overflow-auto">

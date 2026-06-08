@@ -1,9 +1,10 @@
 ﻿import React, { useState } from 'react'
-import { Truck, RotateCcw, Loader2 } from 'lucide-react'
+import { Truck, RotateCcw, Loader2, Bell } from 'lucide-react'
 import { toast } from 'sonner'
 import { useFleet } from '../state/store'
 import { fleetApi, FleetApiError } from '../api/fleet'
 import type { Station, Task, OpcuaTestResult } from '../api/types'
+import { PageHeader } from '@/app/components/PageHeader'
 
 const SUPPLIER = 'AP1'
 const CONSUMER = 'CB1'
@@ -118,11 +119,16 @@ export function Callbuttons() {
   return (
     <div className="flex-1 flex flex-col bg-[#0d1117]">
       {/* Header */}
-      <div className="border-b border-[#30363d] px-6 py-3 flex items-center gap-3 flex-shrink-0">
-        <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-400' : 'bg-red-400 animate-pulse'}`} />
-        <span className="text-sm font-semibold text-[#e6edf3]">Botões de Chamada</span>
-        <span className="text-xs text-[#484f58] ml-1">— via OPC UA quando em modo hardware</span>
-      </div>
+      <PageHeader
+        icon={<Bell className="w-4 h-4 text-[#58a6ff]" />}
+        title="Botões de Chamada"
+        status={
+          <span className="ml-1 flex items-center gap-2">
+            <span className={`w-2 h-2 rounded-full ${connected ? 'bg-green-400' : 'bg-red-400 animate-pulse'}`} />
+            <span className="text-xs text-[#484f58]">— via OPC UA quando em modo hardware</span>
+          </span>
+        }
+      />
 
       {/* Guard: required callbutton stations must exist in the loaded map. */}
       {(!supplier || !consumer) ? (

@@ -7,6 +7,7 @@ import { useJog, type JogDir } from '../hooks/useJog'
 import { MapCanvas } from '../components/MapCanvas'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
+import { PageHeader } from '@/app/components/PageHeader'
 import type { Robot, Station, Landmark } from '../api/types'
 
 // Lazy-loaded so three.js / R3F stay out of the initial bundle; only fetched when
@@ -282,58 +283,64 @@ export function Field() {
   return (
     <div className="flex-1 flex flex-col bg-[#0d1117]">
       {/* Header */}
-      <div className="border-b border-[#30363d] px-6 py-3 flex items-center gap-3 flex-shrink-0">
-        <Map className="w-4 h-4 text-[#58a6ff]" />
-        <h1 className="text-sm font-semibold text-[#e6edf3]">Vista de Campo</h1>
-        <div className={`w-2 h-2 rounded-full ml-2 ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
-        <span className="text-xs text-[#8b949e]">{connected ? 'Ao vivo' : 'Desconectado'}</span>
-        <div className="ml-auto flex items-center gap-2 text-xs text-[#8b949e]">
-          {/* 2D / 3D toggle */}
-          <div className="flex items-center rounded border border-[#30363d] overflow-hidden">
-            <button
-              onClick={() => setViewMode('2d')}
-              className={`flex items-center gap-1 px-2 py-1 transition-colors ${
-                viewMode === '2d'
-                  ? 'bg-[#21262d] text-[#e6edf3]'
-                  : 'text-[#8b949e] hover:bg-[#161b22]'
-              }`}
-            >
-              <LayoutGrid className="w-3 h-3" />
-              2D
+      <PageHeader
+        icon={<Map className="w-4 h-4 text-[#58a6ff]" />}
+        title="Vista de Campo"
+        status={
+          <span className="ml-1 flex items-center gap-2">
+            <span className={`w-2 h-2 rounded-full ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
+            <span className="text-xs text-[#8b949e]">{connected ? 'Ao vivo' : 'Desconectado'}</span>
+          </span>
+        }
+        actions={
+          <div className="flex items-center gap-2 text-xs text-[#8b949e]">
+            {/* 2D / 3D toggle */}
+            <div className="flex items-center rounded border border-[#30363d] overflow-hidden">
+              <button
+                onClick={() => setViewMode('2d')}
+                className={`flex items-center gap-1 px-2 py-1 transition-colors ${
+                  viewMode === '2d'
+                    ? 'bg-[#21262d] text-[#e6edf3]'
+                    : 'text-[#8b949e] hover:bg-[#161b22]'
+                }`}
+              >
+                <LayoutGrid className="w-3 h-3" />
+                2D
+              </button>
+              <button
+                onClick={() => setViewMode('3d')}
+                className={`flex items-center gap-1 px-2 py-1 transition-colors border-l border-[#30363d] ${
+                  viewMode === '3d'
+                    ? 'bg-[#21262d] text-[#58a6ff]'
+                    : 'text-[#8b949e] hover:bg-[#161b22]'
+                }`}
+              >
+                <Box className="w-3 h-3" />
+                3D
+              </button>
+            </div>
+
+            {/* Laser toggle (only useful in 2D mode but kept available) */}
+            <button onClick={() => setLaserOn(v => !v)}
+              className={`flex items-center gap-1.5 px-2 py-1 rounded border transition-colors
+                ${laserOn ? 'border-[#f0883e] text-[#f0883e] bg-[#f0883e]/10' : 'border-[#30363d] hover:bg-[#161b22]'}`}>
+              <Radar className="w-3.5 h-3.5" />
+              Laser
             </button>
-            <button
-              onClick={() => setViewMode('3d')}
-              className={`flex items-center gap-1 px-2 py-1 transition-colors border-l border-[#30363d] ${
-                viewMode === '3d'
-                  ? 'bg-[#21262d] text-[#58a6ff]'
-                  : 'text-[#8b949e] hover:bg-[#161b22]'
-              }`}
-            >
-              <Box className="w-3 h-3" />
-              3D
+
+            {/* Side 3D preview panel toggle */}
+            <button onClick={() => setShow3DPanel(v => !v)}
+              className={`flex items-center gap-1.5 px-2 py-1 rounded border transition-colors
+                ${show3DPanel ? 'border-[#58a6ff] text-[#58a6ff] bg-[#58a6ff]/10' : 'border-[#30363d] hover:bg-[#161b22]'}`}>
+              <Box className="w-3.5 h-3.5" />
+              Painel 3D
             </button>
+            <span>{robots.length} robôs</span>
+            <span>·</span>
+            <span>{stations.length} estações</span>
           </div>
-
-          {/* Laser toggle (only useful in 2D mode but kept available) */}
-          <button onClick={() => setLaserOn(v => !v)}
-            className={`flex items-center gap-1.5 px-2 py-1 rounded border transition-colors
-              ${laserOn ? 'border-[#f0883e] text-[#f0883e] bg-[#f0883e]/10' : 'border-[#30363d] hover:bg-[#161b22]'}`}>
-            <Radar className="w-3.5 h-3.5" />
-            Laser
-          </button>
-
-          {/* Side 3D preview panel toggle */}
-          <button onClick={() => setShow3DPanel(v => !v)}
-            className={`flex items-center gap-1.5 px-2 py-1 rounded border transition-colors
-              ${show3DPanel ? 'border-[#58a6ff] text-[#58a6ff] bg-[#58a6ff]/10' : 'border-[#30363d] hover:bg-[#161b22]'}`}>
-            <Box className="w-3.5 h-3.5" />
-            Painel 3D
-          </button>
-          <span>{robots.length} robôs</span>
-          <span>·</span>
-          <span>{stations.length} estações</span>
-        </div>
-      </div>
+        }
+      />
 
       {/* Main canvas + side panel */}
       <div className="flex-1 flex overflow-hidden">

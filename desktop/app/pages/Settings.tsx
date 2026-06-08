@@ -5,6 +5,7 @@ import { useFleet } from '../state/store'
 import { fleetApi, FleetApiError, type MapInfo } from '../api/fleet'
 import { Button } from '../components/ui/button'
 import { Badge } from '../components/ui/badge'
+import { PageHeader } from '@/app/components/PageHeader'
 
 const DEFAULT_URL = 'http://localhost:8765'
 
@@ -171,12 +172,16 @@ export function SettingsPage() {
   return (
     <div className="flex-1 flex flex-col bg-[#0d1117]">
       {/* Header */}
-      <div className="border-b border-[#30363d] px-6 py-3 flex items-center gap-3 flex-shrink-0">
-        <Settings className="w-4 h-4 text-[#58a6ff]" />
-        <h1 className="text-sm font-semibold text-[#e6edf3]">Configurações</h1>
-        <div className={`w-2 h-2 rounded-full ml-2 ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
-        <span className="text-xs text-[#8b949e]">{connected ? 'Conectado' : 'Desconectado'}</span>
-      </div>
+      <PageHeader
+        icon={<Settings className="w-4 h-4 text-[#58a6ff]" />}
+        title="Configurações"
+        status={
+          <span className="ml-1 flex items-center gap-2">
+            <span className={`w-2 h-2 rounded-full ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
+            <span className="text-xs text-[#8b949e]">{connected ? 'Conectado' : 'Desconectado'}</span>
+          </span>
+        }
+      />
 
       <div className="flex-1 overflow-auto p-6 max-w-2xl space-y-6">
 
