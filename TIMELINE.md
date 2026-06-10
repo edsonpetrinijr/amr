@@ -6,6 +6,7 @@
 
 | Dia | Resumo |
 |-----|--------|
+| [`2026-06-09`](docs/log/2026-06-09.md) | Reunião DOS (tablet substitui etiquetas): extrair info p/ alimentar o AMR numa célula dedicada sempre-AMR; DOS = muitas sprints → **estratégia de desacoplar e depender o mínimo do DOS** (usar o feed já achado). **Célula-piloto escolhida por dados (TRANVR2): BT30CS principal / BT09TC backup** — validar fisicamente c/ Cleber/Douglas/Fábio. M4 Boot destravado: trick-m4-6.13.4 + JDK 17 instalados manualmente (proxy CAT). |
 | [`2026-06-08`](docs/log/2026-06-08.md) | Feed de pedidos da CAT decodificado + fontes reais (txt/Oracle) achadas; alinhamento Zampim; MVP da linha de montagem; polimento pré-demo (pt-BR + branding). |
 | [`2026-06-03`](docs/log/2026-06-03.md) | Dia cheio: render AMR (2D/3D), modelo W3 colorido, seletor de mapa, devices/callbuttons, relocalização-assist; rename desktop/server; visita de campo. |
 | [`2026-06-02`](docs/log/2026-06-02.md) | Time de agentes de IA montado + timeline iniciada; Sprints 0–4 + LiDAR; pivô "sem robô" (Pilot Hardening); estudo de preço/concorrentes. |

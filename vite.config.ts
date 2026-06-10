@@ -23,4 +23,12 @@ export default defineConfig({
       '@': path.resolve(__dirname, './desktop'),
     },
   },
+  server: {
+    watch: {
+      // Exclude the Python backend directory entirely — SQLite journals,
+      // .db files and Python caches change constantly and must never
+      // trigger a Vite HMR/reload cycle.
+      ignored: ['**/server/**', '**/*.db', '**/*.db-journal', '**/*.db-wal', '**/*.db-shm'],
+    },
+  },
 })

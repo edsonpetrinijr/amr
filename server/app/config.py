@@ -62,7 +62,7 @@ if _opcua_action_raw:
 # ── ERP "Reposição" (replenishment) feed — Phase 1 ──────────────────────────
 # A rolling ~375k-line fixed-width snapshot refreshed ~15 min. We NEVER open the
 # source in place — always copy it locally (ERP_WORK_COPY) and parse the copy.
-ERP_FEED_PATH    = os.getenv("ERP_FEED_PATH", r"C:\Users\junioeg\robotics\robotics1\TRANVR2.TXT")
+ERP_FEED_PATH    = os.getenv("ERP_FEED_PATH", os.path.join(os.path.dirname(__file__), "..", "fixtures", "poc_conversor.txt"))
 ERP_WORK_COPY    = os.getenv("ERP_WORK_COPY", os.path.join(os.path.dirname(__file__), "..", "erp_feed_copy.txt"))
 ERP_MAPPING_PATH = os.getenv("ERP_MAPPING_PATH", os.path.join(os.path.dirname(__file__), "..", "config", "erp_mapping.yaml"))
 ERP_POLL_INTERVAL_S = float(os.getenv("ERP_POLL_INTERVAL_S", "10.0"))
@@ -70,18 +70,25 @@ ERP_POLL_INTERVAL_S = float(os.getenv("ERP_POLL_INTERVAL_S", "10.0"))
 # turns 28k matching rows into 28k jobs in one go.
 ERP_MAX_DISPATCH = int(os.getenv("ERP_MAX_DISPATCH", "5"))
 # Stations (Sim PoC). ENVIO = where the AMR loads/leaves; RECEBIMENTO = where an
-# empty rack returns. Both carry a SEER landmark in Sim (CB-ALMOX → LM1).
-ERP_ENVIO_STATION       = os.getenv("ERP_ENVIO_STATION", "CB-ALMOX")
-ERP_RECEBIMENTO_STATION = os.getenv("ERP_RECEBIMENTO_STATION", "CB-ALMOX")
+# empty rack returns. Both = BTLOG1 (estoque) no PoC Conversor de Torque.
+ERP_ENVIO_STATION       = os.getenv("ERP_ENVIO_STATION", "BTLOG1")
+ERP_RECEBIMENTO_STATION = os.getenv("ERP_RECEBIMENTO_STATION", "BTLOG1")
 
-# AMR trigger filter — the named TRIMMED field must equal `value`. Swapping to
-# {"field":"observation","value":"AMR"} later is a ONE-LINE config change.
-ERP_AMR_FILTER: dict = {"field": "cell", "value": "C ILC"}
+# AMR trigger filter — the named TRIMMED field must equal `value` OR be one of
+# `values` (set membership). PoC Conversor de Torque dispara por PART NUMBER
+# (3 PNs da sub do conversor). Trocar p/ {"field":"cell","value":"C ILC"} ou
+# {"field":"observation","value":"AMR"} é mudança de UMA linha de config.
+ERP_AMR_FILTER: dict = {"field": "part_number",
+                        "values": ["3679579", "4175193", "3989602"]}
 _erp_filter_raw = os.getenv("ERP_AMR_FILTER", "").strip()
 if _erp_filter_raw:
     try:
         _f = _json.loads(_erp_filter_raw)
-        ERP_AMR_FILTER = {"field": str(_f["field"]), "value": str(_f["value"])}
+        if "values" in _f and _f["values"] is not None:
+            ERP_AMR_FILTER = {"field": str(_f["field"]),
+                              "values": [str(v) for v in _f["values"]]}
+        else:
+            ERP_AMR_FILTER = {"field": str(_f["field"]), "value": str(_f["value"])}
     except Exception as _e:  # noqa: BLE001
         print(f"[config] ignoring invalid ERP_AMR_FILTER: {_e}")
 
@@ -117,7 +124,7 @@ STATIONS = [
     # FLAG for Product: confirm the boolBTN012/022 node ids are the live buttons.
     # The live map (1007.smap) only has landmarks LM1 + LM2; the pilot shuttles
     # LM1 (Almox/AP1) ↔ LM2 (Linha/CB1), matching context/botoes_landmarks.py.
-    {"id": "CB1",   "type": "callbutton", "label": "Linha A · Posto 1","x": 12, "y": 18, "seer_lm": "LM2",  "ap_id": None,  "opcua_node": "ns=1;s=boolBTN012", "opcua_ret": "ns=1;s=boolBTN022"},
+    {"id": "CB1",   "type": "callbutton", "label": "BT-09TC · Linha","x": 12, "y": 18, "seer_lm": "LM2",  "ap_id": None,  "opcua_node": "ns=1;s=boolBTN012", "opcua_ret": "ns=1;s=boolBTN022"},
     # CB2–CB6 are future expansion stations (Linhas A/B/C) that are NOT yet on the
     # live map — it only has LM1 + LM2. Their old LM11–LM15 bindings were stale
     # phantoms, so seer_lm is None until they're surveyed and added to the .smap.
@@ -129,7 +136,16 @@ STATIONS = [
     # CB-ALMOX (ex-AP1): Action Points foram REMOVIDOS — agora é um callbutton
     # comum ligado ao landmark LM1. O modelo novo: o operador aperta o botão da
     # ORIGEM e depois o do DESTINO; o robô faz o transporte LM_origem → LM_destino.
-    {"id": "CB-ALMOX", "type": "callbutton", "label": "Almox · Doca 1", "x": 18, "y": 58, "seer_lm": "LM1", "ap_id": None, "opcua_node": "ns=1;s=boolBTN011", "opcua_ret": "ns=1;s=boolBTN021"},
+    {"id": "CB-ALMOX", "type": "callbutton", "label": "LOG01 · Estoque", "x": 18, "y": 58, "seer_lm": "LM1", "ap_id": None, "opcua_node": "ns=1;s=boolBTN011", "opcua_ret": "ns=1;s=boolBTN021"},
+
+    # ── PoC Conversor de Torque (Sim) ────────────────────────────────────────
+    # Gatilho por PART NUMBER (3 PNs da sub do conversor). Pickup único BTLOG1
+    # (estoque) → 3 pontos de uso FISICAMENTE DISTINTOS na linha. Coords no
+    # espaço sim 0..100; seer_lm=None até o survey físico do mapa real.
+    {"id": "BTLOG1",    "type": "callbutton", "label": "BTLOG1 · Estoque",      "x": 20, "y": 78, "seer_lm": None, "ap_id": None, "opcua_node": None},
+    {"id": "FLBT10TC1", "type": "callbutton", "label": "BT10TC · POU FLBT10TC1", "x": 14, "y": 22, "seer_lm": None, "ap_id": None, "opcua_node": None},
+    {"id": "FLBT10TC2", "type": "callbutton", "label": "BT10TC · POU FLBT10TC2", "x": 30, "y": 16, "seer_lm": None, "ap_id": None, "opcua_node": None},
+    {"id": "FLBT10TC3", "type": "callbutton", "label": "BT09TC · POU FLBT10TC3", "x": 46, "y": 22, "seer_lm": None, "ap_id": None, "opcua_node": None},
 ]
 
 # Action Points removidos: o despacho não usa mais pares supplier/consumer. Um

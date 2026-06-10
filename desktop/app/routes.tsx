@@ -6,6 +6,7 @@ import { Devices } from "./pages/Devices"
 import { Calibration } from "./pages/Calibration"
 import { Tasks } from "./pages/Tasks"
 import { Callbuttons } from "./pages/Callbuttons"
+import { Reposicao } from "./pages/Reposicao"
 import { SettingsPage } from "./pages/Settings"
 
 // Hash history (not browser history): the packaged Electron app is served from a
@@ -24,6 +25,7 @@ export const router = createHashRouter([
       { path: "calibration/:robotId", Component: Calibration },
       { path: "tasks", Component: Tasks },
       { path: "callbuttons", Component: Callbuttons },
+      { path: "reposicao", Component: Reposicao },
       { path: "settings", Component: SettingsPage },
     ],
   },

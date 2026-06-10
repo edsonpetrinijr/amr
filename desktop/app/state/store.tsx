@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useReducer } from 'react'
 import { startFleetSSE, stopFleetSSE, onFleetMsg, onFleetStatus, fleetApi } from '../api/fleet'
-import type { Robot, Station, Task, MapModel, AlarmMsg } from '../api/types'
+import type { Robot, Station, Task, MapModel, AlarmMsg, ErpOrder } from '../api/types'
 
 // ── State shape ───────────────────────────────────────────────────────────────
 
@@ -12,6 +12,9 @@ export interface FleetState {
   allTasks: Task[]    // full history (loaded once via REST + updated by task_update)
   map: MapModel | null
   alarms: AlarmMsg[]
+  erpOrders: ErpOrder[]   // live ERP replenishment board (Reposição)
+  amrReady: boolean       // a robot is idle/available at the envio station
+  envioStation: string
   lastTs: number
 }
 
@@ -23,6 +26,9 @@ const initial: FleetState = {
   allTasks: [],
   map: null,
   alarms: [],
+  erpOrders: [],
+  amrReady: false,
+  envioStation: '',
   lastTs: 0,
 }
 
@@ -43,8 +49,17 @@ function reducer(state: FleetState, action: Action): FleetState {
       return { ...state, connected: true }
     case 'DISCONNECTED':
       return { ...state, connected: false }
-    case 'WORLD':
-      return { ...state, robots: action.robots, stations: action.stations, tasks: action.tasks, lastTs: action.ts, connected: true }
+    case 'WORLD': {
+      // Avoid replacing the stations array reference when content is unchanged —
+      // stations are config-based and rarely change between world pushes.
+      // Stable reference = no re-render for components that only read stations.
+      const stations =
+        state.stations.length === action.stations.length &&
+        action.stations.every((s, i) => s.id === state.stations[i]?.id)
+          ? state.stations
+          : action.stations
+      return { ...state, robots: action.robots, stations, tasks: action.tasks, lastTs: action.ts, connected: true }
+    }
     case 'MAP':
       return { ...state, map: action.map }
     case 'TASK_UPDATE': {

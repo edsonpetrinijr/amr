@@ -14,8 +14,9 @@ log = logging.getLogger(__name__)
 class ErpMapping:
     """Resolves an ERP record to a (pickup, dropoff) station pair.
 
-    Match order: cell → pou → storage_loc → default. Returns (None, None) when
-    nothing matches and there is no default (→ caller parks it blocked_unmapped).
+    Match order: part_number → cell → pou → storage_loc → default. Returns
+    (None, None) when nothing matches and there is no default (→ caller parks it
+    blocked_unmapped).
     """
 
     def __init__(self, data: dict | None) -> None:
@@ -34,12 +35,18 @@ class ErpMapping:
         return (self.data.get("default") or {}).get("dropoff")
 
     def resolve(self, record) -> tuple[str | None, str | None]:
-        for key in ("cell", "pou", "storage_loc"):
+        # Match order: part_number → cell → pou → storage_loc → default.
+        # Keys are compared as TRIMMED strings on both sides so a numeric YAML
+        # key (PyYAML parses `3679579:` as int) still matches the string field.
+        for key in ("part_number", "cell", "pou", "storage_loc"):
             section = self.data.get(key) or {}
             val = getattr(record, key, "")
-            if val and val in section:
-                m = section[val] or {}
-                return m.get("pickup"), m.get("dropoff")
+            if not val:
+                continue
+            for sk, sv in section.items():
+                if str(sk).strip() == str(val).strip():
+                    m = sv or {}
+                    return m.get("pickup"), m.get("dropoff")
         d = self.data.get("default")
         if d:
             return d.get("pickup"), d.get("dropoff")

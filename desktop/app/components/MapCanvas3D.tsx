@@ -216,10 +216,21 @@ function Landmarks({ landmarks }: { landmarks: MapModel['landmarks'] }) {
   return (
     <>
       {landmarks.map(lm => (
-        <mesh key={lm.id} position={[lm.x, 0.12, lm.y]}>
-          <sphereGeometry args={[0.12, 12, 12]} />
-          <meshStandardMaterial color="#8b949e" emissive="#8b949e" emissiveIntensity={0.1} roughness={0.6} />
-        </mesh>
+        <group key={lm.id} position={[lm.x, 0, lm.y]}>
+          <mesh position={[0, 0.12, 0]}>
+            <sphereGeometry args={[0.12, 12, 12]} />
+            <meshStandardMaterial color="#8b949e" emissive="#8b949e" emissiveIntensity={0.1} roughness={0.6} />
+          </mesh>
+          {/* Show label (founder-added landmark name) if present, else just id */}
+          <Html position={[0, 0.5, 0]} center style={{ pointerEvents: 'none' }}>
+            <span style={{
+              fontSize: '9px', fontFamily: 'monospace', color: '#8b949e',
+              background: '#0d111790', padding: '1px 3px', borderRadius: 2, whiteSpace: 'nowrap',
+            }}>
+              {lm.label ? `${lm.id} · ${lm.label}` : lm.id}
+            </span>
+          </Html>
+        </group>
       ))}
     </>
   )

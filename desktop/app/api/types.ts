@@ -15,7 +15,7 @@ export interface Area {
   points: Pos2D[]
 }
 
-export interface Landmark { id: string; x: number; y: number }
+export interface Landmark { id: string; x: number; y: number; label?: string }
 
 /** GET /robots/<id>/laser — beams are WORLD/MAP-frame [x, y] metres (protocol
  *  PDF p.24). The canvas draws them directly via tx/ty with no pose composition.
@@ -130,6 +130,59 @@ export interface Task {
   created_at: number; assigned_at: number | null; done_at: number | null
 }
 
+// ── ERP replenishment orders (Reposição) ──────────────────────────────────────
+
+export type ErpOrderStatus =
+  | 'seen' | 'blocked_unmapped' | 'ready_for_confirmation'
+  | 'confirmed' | 'dispatched' | 'em_entrega' | 'delivered' | 'cancelled'
+
+/** One ERP record surfaced for AMR replenishment. `record_type_class` splits the
+ *  main order queue from the empties/return lane ('empty_return'). */
+export interface ErpOrder {
+  order_key: string
+  record_type: string
+  record_type_class: string   // 'order' | 'fulfillment' | 'cancellation' | 'empty_return'
+  part_number: string
+  storage_loc: string
+  cell: string
+  pou: string
+  quantity: string
+  order_date_raw: string
+  observation: string
+  amr_flagged: boolean
+  status: ErpOrderStatus
+  pickup_station: string | null
+  dropoff_station: string | null
+  task_id: string | null
+  first_seen_ts: number
+  dispatched_ts: number | null
+  delivered_ts: number | null
+  cancelled_ts: number | null
+  last_seen_ts: number
+  note: string | null
+}
+
+/** GET /erp/orders */
+export interface ErpOrdersResponse {
+  orders: ErpOrder[]
+  amr_ready: boolean
+  envio_station: string
+}
+
+/** POST /erp/confirm-delivery → 200 {ok, order} | 409 {ok:false, error} */
+export interface ConfirmDeliveryResult {
+  ok: boolean
+  order?: ErpOrder
+  error?: string
+}
+
+/** POST /erp/request-empty → 200 {ok, ...job} | 409 {ok:false, error} */
+export interface RequestEmptyResult {
+  ok: boolean
+  error?: string
+  [k: string]: unknown
+}
+
 // ── SSE message envelopes ─────────────────────────────────────────────────────
 
 export interface WorldMsg {
@@ -153,7 +206,10 @@ export interface RelocalizeAssistPayload {
 }
 export interface AlarmMsg { type: 'alarm';        level: string; message: string; robot_id: string | null; ts: number; payload?: RelocalizeAssistPayload }
 
-export type FleetMsg = WorldMsg | MapMsg | TaskMsg | CBMsg | AlarmMsg
+/** SSE — emitted on every ERP order create / status change. */
+export interface ErpOrderMsg { type: 'erp_order'; ts: number; order: ErpOrder }
+
+export type FleetMsg = WorldMsg | MapMsg | TaskMsg | CBMsg | AlarmMsg | ErpOrderMsg
 
 // ── Relocalization assist (GET /relocalize/suggestions) ───────────────────────
 

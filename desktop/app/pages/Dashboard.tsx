@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react"
+import React, { useEffect, useMemo, useState } from "react"
 import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/card"
 import { Badge } from "../components/ui/badge"
 import { Button } from "../components/ui/button"
@@ -83,9 +83,10 @@ export function Dashboard() {
 
   const stationLabel = (id: string) => stations.find((s: Station) => s.id === id)?.label ?? id
 
-  const recentTasks = [...allTasks]
-    .sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0))
-    .slice(0, 6)
+  const recentTasks = useMemo(
+    () => [...allTasks].sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0)).slice(0, 6),
+    [allTasks]
+  )
 
   const waiting = !connected && robots.length === 0
 

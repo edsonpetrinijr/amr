@@ -9,6 +9,7 @@ import type {
   RelocalizeSuggestionsResponse,
   RobotMutationResult, ProbeResult, OpcuaTestResult, StationMutationResult,
   NavigateResult,
+  ErpOrdersResponse, ConfirmDeliveryResult, RequestEmptyResult,
 } from './types'
 
 const BASE: string = import.meta.env?.VITE_FLEET_URL ?? 'http://localhost:8765'
@@ -266,4 +267,20 @@ export const fleetApi = {
 
   getTasksHistory: (opts?: { since?: number; limit?: number }) =>
     _json(`/tasks/history${_qs(opts)}`) as Promise<TasksHistory>,
+
+  // ── ERP replenishment (Reposição) ───────────────────────────────────────────
+
+  /** GET /erp/orders — live ERP order board + AMR readiness at the envio station. */
+  getErpOrders: () =>
+    _json('/erp/orders') as Promise<ErpOrdersResponse>,
+
+  /** POST /erp/confirm-delivery — operator confirms the staged delivery (mirrors
+   *  the physical callbutton). Surfaces 409 (nothing to confirm) via FleetApiError. */
+  confirmDelivery: () =>
+    _jsonOrError('/erp/confirm-delivery', { method: 'POST' }) as Promise<ConfirmDeliveryResult>,
+
+  /** POST /erp/request-empty — request an empty rack pickup. Surfaces 409 via
+   *  FleetApiError. */
+  requestEmpty: () =>
+    _jsonOrError('/erp/request-empty', { method: 'POST' }) as Promise<RequestEmptyResult>,
 }

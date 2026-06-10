@@ -286,7 +286,7 @@ def _startup() -> None:
 
     smap_path = os.getenv(
         "SMAP_PATH",
-        str(Path(__file__).parents[2] / "maps" / "1007.smap")
+        str(Path(__file__).parents[2] / "maps" / "InnovationBox copy.smap")
     )
 
     if config.SIM_MODE:

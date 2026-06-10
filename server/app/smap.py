@@ -95,9 +95,13 @@ class Landmark:
     id: str
     x: float
     y: float
+    label: str = ""   # optional human label (property key="label" → stringValue)
 
     def to_dict(self) -> dict:
-        return {"id": self.id, "x": self.x, "y": self.y}
+        d = {"id": self.id, "x": self.x, "y": self.y}
+        if self.label:
+            d["label"] = self.label
+        return d
 
 
 @dataclass
@@ -265,8 +269,15 @@ def load_map(path: str | Path) -> MapModel:
             or instance_name.startswith("LM")
         )
         if is_landmark:
+            # Extract optional human label from the property array (key="label").
+            # InnovationBox copy.smap carries e.g. {"key":"label","type":"string","stringValue":"LOG01"}.
+            lm_label = ""
+            for prop in entry.get("property", []):
+                if prop.get("key") == "label":
+                    lm_label = str(prop.get("stringValue", ""))
+                    break
             # Landmark only — do NOT also register it as an action point.
-            landmarks.append(Landmark(id=instance_name, x=px, y=py))
+            landmarks.append(Landmark(id=instance_name, x=px, y=py, label=lm_label))
         else:
             action_points.append(ActionPoint(
                 id=instance_name,

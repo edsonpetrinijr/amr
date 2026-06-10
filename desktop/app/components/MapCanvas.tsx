@@ -66,6 +66,87 @@ const STATION_COLOR: Record<string, string> = {
   ap:         '#58a6ff',
 }
 
+// ── Static map layers (memoized — only repaint on map swap, NOT on robot updates) ──
+// Nav cloud, walls, routes, areas, and landmarks are all pure functions of `map`.
+// Extracting them here means they never touch the DOM on the ~1 Hz world SSE tick.
+const StaticMapLayers = React.memo(function StaticMapLayers({
+  map, tx, ty,
+}: {
+  map: MapModel
+  tx: (x: number) => number
+  ty: (y: number) => number
+}) {
+  const navSample = useMemo(() => {
+    const step = Math.max(1, Math.floor(map.nav_points.length / 600))
+    return map.nav_points.filter((_, i) => i % step === 0)
+  }, [map.nav_points])
+
+  return (
+    <>
+      {/* Nav cloud (drivable area) */}
+      {navSample.map((p, i) => (
+        <circle key={i} cx={tx(p.x)} cy={ty(p.y)} r={1.2} fill="#1c2128" />
+      ))}
+
+      {/* Walls / feature lines */}
+      {map.walls.map((w, i) => (
+        <line key={i}
+          x1={tx(w.start.x)} y1={ty(w.start.y)}
+          x2={tx(w.end.x)}   y2={ty(w.end.y)}
+          stroke="#58a6ff" strokeWidth={1.5} strokeOpacity={0.6}
+        />
+      ))}
+
+      {/* Routes (LM paths from advancedCurveList) */}
+      {(map.routes ?? []).map((r, i) => {
+        const x1 = tx(r.start.x), y1 = ty(r.start.y)
+        const x2 = tx(r.ctrl1.x), y2 = ty(r.ctrl1.y)
+        const x3 = tx(r.ctrl2.x), y3 = ty(r.ctrl2.y)
+        const x4 = tx(r.end.x),   y4 = ty(r.end.y)
+        const d = `M ${x1} ${y1} C ${x2} ${y2}, ${x3} ${y3}, ${x4} ${y4}`
+        const ang = Math.atan2(y4 - y3, x4 - x3)
+        const aw = 6
+        const arrowD = r.direction !== 0
+          ? `M ${x4} ${y4} l ${-aw * Math.cos(ang - 0.4)} ${-aw * Math.sin(ang - 0.4)} M ${x4} ${y4} l ${-aw * Math.cos(ang + 0.4)} ${-aw * Math.sin(ang + 0.4)}`
+          : ''
+        return (
+          <g key={i}>
+            <path d={d} fill="none" stroke="#30a46c" strokeWidth={1.5}
+              strokeOpacity={0.7} strokeDasharray={r.direction === 0 ? undefined : '5 3'} />
+            {r.direction !== 0 && (
+              <path d={arrowD} fill="none" stroke="#30a46c" strokeWidth={1.5} strokeLinecap="round" />
+            )}
+          </g>
+        )
+      })}
+
+      {/* Areas */}
+      {map.areas.map(area => {
+        if (area.points.length < 3) return null
+        const pts = area.points.map(p => `${tx(p.x)},${ty(p.y)}`).join(' ')
+        const color = area.class_name.toLowerCase().includes('charge') ? '#d29922'
+                    : area.class_name.toLowerCase().includes('forbidden') ? '#f85149'
+                    : '#3fb950'
+        return (
+          <polygon key={area.id} points={pts}
+            fill={color + '20'} stroke={color} strokeWidth={1} strokeOpacity={0.5}
+          />
+        )
+      })}
+
+      {/* Landmarks (with optional founder-added label) */}
+      {map.landmarks.map(lm => (
+        <g key={lm.id} transform={`translate(${tx(lm.x)},${ty(lm.y)})`}>
+          <circle r={5} fill="#8b949e22" stroke="#8b949e" strokeWidth={1} />
+          <text y={-8} textAnchor="middle" fill="#8b949e" fontSize={9} fontFamily="monospace">
+            {lm.label ? `${lm.id} · ${lm.label}` : lm.id}
+          </text>
+        </g>
+      ))}
+    </>
+  )
+})
+
 export function MapCanvas({ map, robots = [], stations = [], laser, onClickAP, onClickRobot, selectedId, className }: Props) {
   const { tx, ty, scale } = useTransform(map)
 
@@ -143,14 +224,7 @@ export function MapCanvas({ map, robots = [], stations = [], laser, onClickAP, o
 
   const resetView = () => setView({ x: 0, y: 0, w: W, h: H })
 
-  // Nav points — render as tiny dots for the drivable area cloud
-  // Downsample to max 600 pts for perf
-  const navSample = useMemo(() => {
-    const step = Math.max(1, Math.floor(map.nav_points.length / 600))
-    return map.nav_points.filter((_, i) => i % step === 0)
-  }, [map.nav_points])
-
-  // Laser beams — downsample to max 600 pts for perf (like navSample)
+  // Laser beams — downsample to max 600 pts for perf
   const laserSample = useMemo(() => {
     const beams = laser?.beams ?? []
     const step = Math.max(1, Math.floor(beams.length / 600))
@@ -186,67 +260,8 @@ export function MapCanvas({ map, robots = [], stations = [], laser, onClickAP, o
       </defs>
       <rect width={W} height={H} fill="url(#grid)" />
 
-      {/* ── Nav cloud (drivable area) ────────────────────────────────── */}
-      {navSample.map((p, i) => (
-        <circle key={i} cx={tx(p.x)} cy={ty(p.y)} r={1.2} fill="#1c2128" />
-      ))}
-
-      {/* ── Walls / feature lines ────────────────────────────────────── */}
-      {map.walls.map((w, i) => (
-        <line key={i}
-          x1={tx(w.start.x)} y1={ty(w.start.y)}
-          x2={tx(w.end.x)}   y2={ty(w.end.y)}
-          stroke="#58a6ff" strokeWidth={1.5} strokeOpacity={0.6}
-        />
-      ))}
-
-      {/* ── Routes (LM paths from advancedCurveList) ─────────────────────── */}
-      {(map.routes ?? []).map((r, i) => {
-        const x1 = tx(r.start.x), y1 = ty(r.start.y)
-        const x2 = tx(r.ctrl1.x), y2 = ty(r.ctrl1.y)
-        const x3 = tx(r.ctrl2.x), y3 = ty(r.ctrl2.y)
-        const x4 = tx(r.end.x),   y4 = ty(r.end.y)
-        const d = `M ${x1} ${y1} C ${x2} ${y2}, ${x3} ${y3}, ${x4} ${y4}`
-        // For one-way routes, draw a small arrowhead near the end
-        const ang = Math.atan2(y4 - y3, x4 - x3)
-        const aw = 6
-        const arrowD = r.direction !== 0
-          ? `M ${x4} ${y4} l ${-aw * Math.cos(ang - 0.4)} ${-aw * Math.sin(ang - 0.4)} M ${x4} ${y4} l ${-aw * Math.cos(ang + 0.4)} ${-aw * Math.sin(ang + 0.4)}`
-          : ''
-        return (
-          <g key={i}>
-            <path d={d} fill="none" stroke="#30a46c" strokeWidth={1.5}
-              strokeOpacity={0.7} strokeDasharray={r.direction === 0 ? undefined : '5 3'} />
-            {r.direction !== 0 && (
-              <path d={arrowD} fill="none" stroke="#30a46c" strokeWidth={1.5} strokeLinecap="round" />
-            )}
-          </g>
-        )
-      })}
-
-      {/* ── Areas ────────────────────────────────────────────────────── */}
-      {map.areas.map(area => {
-        if (area.points.length < 3) return null
-        const pts = area.points.map(p => `${tx(p.x)},${ty(p.y)}`).join(' ')
-        const color = area.class_name.toLowerCase().includes('charge') ? '#d29922'
-                    : area.class_name.toLowerCase().includes('forbidden') ? '#f85149'
-                    : '#3fb950'
-        return (
-          <polygon key={area.id} points={pts}
-            fill={color + '20'} stroke={color} strokeWidth={1} strokeOpacity={0.5}
-          />
-        )
-      })}
-
-      {/* ── Landmarks ────────────────────────────────────────────────── */}
-      {map.landmarks.map(lm => (
-        <g key={lm.id} transform={`translate(${tx(lm.x)},${ty(lm.y)})`}>
-          <circle r={5} fill="#8b949e22" stroke="#8b949e" strokeWidth={1} />
-          <text y={-8} textAnchor="middle" fill="#8b949e" fontSize={9} fontFamily="monospace">
-            {lm.id}
-          </text>
-        </g>
-      ))}
+      {/* ── Static map layers — memoized, only repaint on map swap ─── */}
+      <StaticMapLayers map={map} tx={tx} ty={ty} />
 
       {/* ── Stations ─────────────────────────────────────────────────── */}
       {stations.map(s => {

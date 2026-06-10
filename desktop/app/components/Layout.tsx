@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from "react"
 import { NavLink, Outlet, useNavigate } from "react-router"
-import { LayoutDashboard, Map, Cpu, Wrench, ListChecks, Bell, Settings, OctagonX, Play, ShieldAlert } from "lucide-react"
+import { LayoutDashboard, Map, Cpu, Wrench, ListChecks, Bell, PackageCheck, Settings, OctagonX, Play, ShieldAlert } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/app/utils"
 import { useFleet } from "@/app/state/store"
 import { fleetApi } from "@/app/api/fleet"
+import { isMac } from "@/app/lib/platform"
 import {
   AlertDialog, AlertDialogTrigger, AlertDialogContent, AlertDialogHeader,
   AlertDialogFooter, AlertDialogTitle, AlertDialogDescription,
@@ -16,6 +17,7 @@ const navItems = [
   { icon: Map,             label: "Visão de Campo",   path: "/field" },
   { icon: ListChecks,      label: "Tarefas",          path: "/tasks" },
   { icon: Bell,            label: "Botões de Chamada", path: "/callbuttons" },
+  { icon: PackageCheck,    label: "Reposição",        path: "/reposicao" },
   { icon: Cpu,             label: "Dispositivos",     path: "/devices" },
   { icon: Wrench,          label: "Calibração",       path: "/calibration" },
   { icon: Settings,        label: "Configurações",    path: "/settings" },
@@ -99,8 +101,8 @@ export function Layout() {
     <div className="flex h-screen w-full bg-[#0d1117] text-[#c9d1d9] font-sans overflow-hidden">
       {/* Sidebar */}
       <aside className="w-64 border-r border-[#30363d] bg-[#0d1117] flex flex-col shrink-0">
-        {/* Traffic light spacer */}
-        <div className="h-8 shrink-0" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties} />
+        {/* Traffic light spacer — macOS only */}
+        {isMac() && <div className="h-8 shrink-0" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties} />}
         <div className="h-14 border-b border-[#30363d] flex items-center px-4">
           <div className="w-6 h-6 bg-[#58a6ff] rounded-sm mr-3 flex items-center justify-center shrink-0">
             <span className="text-white text-xs font-bold font-mono">CAT</span>

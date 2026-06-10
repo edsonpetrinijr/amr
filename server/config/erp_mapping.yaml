@@ -1,30 +1,41 @@
-# ERP "Reposição" → station mapping (Phase 1, Sim PoC).
+# ERP "Reposição" → station mapping (PoC Conversor de Torque, Sim).
 #
 # An ORDER record is resolved to a (pickup, dropoff) station pair by checking,
-# in order, its `cell`, then `pou`, then `storage_loc` against the sections
-# below; the first match wins. If nothing matches, `default` is used. A station
-# id with NO mapping → the order is parked as `blocked_unmapped` (never moved).
+# in order, its `part_number`, then `cell`, `pou`, `storage_loc` against the
+# sections below; the first match wins. If nothing matches, `default` is used. A
+# station id with NO mapping → the order is parked as `blocked_unmapped`.
 #
-# In Sim ONLY two stations carry a SEER landmark and can move a robot:
-#   CB-ALMOX → LM1 (Almox · Doca 1)     CB1 → LM2 (Linha A · Posto 1)
-# So every mapping below resolves to that single shuttle: CB-ALMOX <-> CB1.
+# PoC: 3 part numbers da sub do conversor de torque. Pickup único BTLOG1
+# (estoque) → 3 pontos de uso FISICAMENTE DISTINTOS na linha (FLBT10TC1/2/3).
+# Rota extraída de TRANVR2.TXT (só atendimentos/consumo real):
+#   3679579 (BT10TC) → FLBT10TC2
+#   4175193 (BT10TC) → FLBT10TC1
+#   3989602 (BT09TC) → FLBT10TC3
 
-# ENVIO = where the loaded AMR departs from; RECEBIMENTO = where an empty rack
-# is returned to. Both are CB-ALMOX (LM1) in the Sim PoC.
-envio_station: CB-ALMOX
-recebimento_station: CB-ALMOX
+# ENVIO = de onde o AMR carregado parte; RECEBIMENTO = onde o rack vazio volta.
+# Ambos = BTLOG1 (estoque) no PoC.
+envio_station: BTLOG1
+recebimento_station: BTLOG1
 
-# Fallback when no cell/pou/storage_loc section matches. Real C ILC orders carry
-# varied pou values, so the default keeps the end-to-end path working in Sim.
+# Fallback quando nenhum part_number/cell/pou/storage_loc casa.
 default:
-  pickup: CB-ALMOX
-  dropoff: CB1
+  pickup: BTLOG1
+  dropoff: FLBT10TC1
 
-# cell → pickup/dropoff. The AMR test trigger is cell "C ILC".
-cell:
-  C ILC:
-    pickup: CB-ALMOX
-    dropoff: CB1
+# part_number → pickup/dropoff. Gatilho do PoC (os 3 PNs do conversor de torque).
+part_number:
+  3679579:
+    pickup: BTLOG1
+    dropoff: FLBT10TC2
+  4175193:
+    pickup: BTLOG1
+    dropoff: FLBT10TC1
+  3989602:
+    pickup: BTLOG1
+    dropoff: FLBT10TC3
+
+# cell → pickup/dropoff (não usado no PoC; o gatilho é por part_number).
+cell: {}
 
 # pou → pickup/dropoff (none specific in the Sim PoC; default covers it).
 pou: {}

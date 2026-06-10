@@ -1,6 +1,7 @@
 # Build artifacts
 dist
 dist-electron
+dist-marketing
 release
 
 # Python artifacts
