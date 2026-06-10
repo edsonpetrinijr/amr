@@ -124,11 +124,15 @@ def tip_pose(chain: List[JointDef], q: np.ndarray) -> Tuple[np.ndarray, np.ndarr
 # --------------------------------------------------------------------------- #
 @dataclass
 class OrbitParams:
+    # --- PARAMETROS FACILMENTE AJUSTAVEIS DA ORBITA ---
+    # Raio maior = camera mais afastada da peca = movimento mais folgado/suave
+    # para o robo real. Mantenha todos os pontos dentro do alcance (~0.9 m da
+    # base) e dos limites de junta do URDF (validar com `python sim/orbit_ik.py`).
     center: Tuple[float, float, float] = (0.40, 0.40, 0.18)  # C no frame BASE (m)
     levels: int = 6
     points_per_level: int = 24
-    radius_bottom: float = 0.22     # raio grande embaixo (m)
-    radius_top: float = 0.12        # raio menor no topo (m)
+    radius_bottom: float = 0.28     # raio grande embaixo (m) -- camera afastada
+    radius_top: float = 0.18        # raio menor no topo (m)
     z_bottom: float = 0.10          # altura do anel mais baixo (m, frame base)
     z_top: float = 0.40             # altura do anel mais alto (m)
     start_angle: float = 0.0        # angulo inicial de cada anel (rad)
@@ -409,6 +413,41 @@ def plan_orbit(params: Optional[OrbitParams] = None,
         levels=params.levels,
         points_per_level=params.points_per_level,
     )
+
+
+# --------------------------------------------------------------------------- #
+# SINGLE SOURCE OF TRUTH para o robo real
+# --------------------------------------------------------------------------- #
+def orbit_joint_sequence(params: Optional[OrbitParams] = None,
+                         seed_deg: Optional[List[float]] = None,
+                         urdf_path: str = URDF_PATH) -> List[List[float]]:
+    """Sequencia de poses de junta (graus) da orbita de inspecao.
+
+    Esta e' a MESMA sequencia que o viewer/sim reproduz (plan.motion_deg): a
+    versao densificada (passos <= ~6 deg entre poses), segura para enviar ao
+    FR5 real via MoveJ sem saltos bruscos. Usar esta funcao garante que sim e
+    robo real partem da mesma fonte da verdade.
+    """
+    plan = plan_orbit(params=params, seed_deg=seed_deg, urdf_path=urdf_path)
+    return plan.motion_deg
+
+
+def urdf_joint_limits_deg(urdf_path: str = URDF_PATH) -> List[Tuple[float, float]]:
+    """Limites (lower, upper) de cada junta j1..j6 em GRAUS, lidos do URDF."""
+    chain = parse_urdf_chain(urdf_path)
+    return [(math.degrees(jd.lower), math.degrees(jd.upper)) for jd in chain]
+
+
+def validate_sequence_limits(seq: List[List[float]],
+                             limits: List[Tuple[float, float]],
+                             margin_deg: float = 0.001) -> None:
+    """Levanta ValueError se qualquer pose viola os limites de junta do URDF."""
+    for i, pose in enumerate(seq):
+        for j, (val, (lo, hi)) in enumerate(zip(pose, limits)):
+            if not (lo - margin_deg <= val <= hi + margin_deg):
+                raise ValueError(
+                    f"Pose #{i}: j{j + 1}={val:.2f} fora dos limites do URDF "
+                    f"[{lo:.2f}, {hi:.2f}]")
 
 
 # --------------------------------------------------------------------------- #
