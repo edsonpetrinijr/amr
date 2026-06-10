@@ -162,45 +162,66 @@ class ErpService:
     # ── Operator actions ────────────────────────────────────────────────────
 
     def confirm_delivery(self) -> dict:
-        """FIFO: dispatch the oldest ready_for_confirmation order to its AMR."""
+        """FIFO: dispatch the oldest ready_for_confirmation order.
+
+        Dual-AMR mode (2+ idle robots): dispatches AMR-A (loaded rack,
+        pickup → dropoff) AND AMR-B (empty return, dropoff → recebimento)
+        atomically in the same lock window.
+
+        Single-AMR mode (exactly 1 idle robot): dispatches AMR-A only and
+        sets note='single_amr_mode — empty return pending'. The
+        POST /erp/request-empty endpoint is the manual fallback.
+        """
         with self._lock:
             order = db.get_oldest_ready_order()
             if order is None:
                 return {"ok": False, "error": "no_ready_order"}
-            task = self._dispatcher.create_task(order["pickup_station"], order["dropoff_station"])
+
+            mode = self.dispatch_mode()
+            if mode == "unavailable":
+                return {"ok": False, "error": "dispatch_failed"}
+
+            # AMR-A: loaded rack  pickup → dropoff
+            task = self._dispatcher.create_task(
+                order["pickup_station"], order["dropoff_station"]
+            )
             if task is None:
                 return {"ok": False, "error": "dispatch_failed"}
+
             now = time.time()
+            note = None if mode == "dual" else "single_amr_mode — empty return pending"
             db.update_erp_order_fields(
-                order["order_key"], status="dispatched", task_id=task.id, dispatched_ts=now,
+                order["order_key"], status="dispatched", task_id=task.id,
+                dispatched_ts=now, note=note,
             )
             updated = db.get_erp_order(order["order_key"])
             self._emit_order(order["order_key"])
-            return {"ok": True, "order": updated}
+
+            result: dict = {"ok": True, "order": updated, "dispatch_mode": mode}
+
+            # AMR-B: empty rack return (dual mode only)
+            if mode == "dual":
+                empty_result = self._dispatch_empty_return(order["dropoff_station"])
+                if empty_result["ok"]:
+                    result["empty_order"] = empty_result["order"]
+                else:
+                    # Loaded dispatch already succeeded — log and downgrade gracefully.
+                    log.warning(
+                        "dual dispatch: AMR-B empty-return failed (%s) — order %s is single",
+                        empty_result.get("error"), order["order_key"],
+                    )
+                    result["empty_order"] = None
+                    result["dispatch_mode"] = "single"
+
+            return result
 
     def request_empty(self) -> dict:
         """Dispatch an AMR from the POU back to RECEBIMENTO to fetch an empty
-        rack. POU origin = most-recent order's dropoff, else mapping default."""
+        rack. POU origin = most-recent order's dropoff, else mapping default.
+        Manual fallback for single-AMR mode or operator override."""
         with self._lock:
             pou_station = self._recent_pou_station()
-            receb = config.ERP_RECEBIMENTO_STATION
-            if not pou_station or not receb:
-                return {"ok": False, "error": "no_pou_station"}
-            task = self._dispatcher.create_task(pou_station, receb)
-            if task is None:
-                return {"ok": False, "error": "dispatch_failed"}
-            now = time.time()
-            key = f"empty_return:{uuid.uuid4().hex[:12]}"
-            o = self._blank_order(key)
-            o.update(
-                record_type="EMPTY", record_type_class="empty_return", amr_flagged=1,
-                status="dispatched", pickup_station=pou_station, dropoff_station=receb,
-                task_id=task.id, first_seen_ts=now, dispatched_ts=now, last_seen_ts=now,
-                note="empty rack return",
-            )
-            db.upsert_erp_order(o)
-            self._emit_order(key)
-            return {"ok": True, "order": db.get_erp_order(key)}
+            return self._dispatch_empty_return(pou_station)
 
     def handle_action(self, action_name: str) -> dict:
         """Dispatch table for physical OPC UA action presses (thread-safe)."""
@@ -217,13 +238,59 @@ class ErpService:
         return db.list_erp_orders(limit)
 
     def amr_ready(self) -> bool:
-        """True if at least one robot is idle/available for the ENVIO station."""
-        for r in self._dispatcher.provider.robots.values():
-            if r.status == IDLE and not r.current_task:
-                return True
-        return False
+        """True if at least one robot is idle/available."""
+        return len(self._idle_robots()) >= 1
+
+    def dispatch_mode(self) -> str:
+        """Current dual/single/unavailable capability based on idle robot count.
+
+        'dual'        — 2+ idle robots: confirm-delivery will dispatch both
+                        AMR-A (loaded) and AMR-B (empty return) atomically.
+        'single'      — exactly 1 idle robot: only AMR-A dispatched;
+                        use POST /erp/request-empty as the manual fallback.
+        'unavailable' — no idle robots: dispatch will be refused.
+        """
+        n = len(self._idle_robots())
+        if n >= 2:
+            return "dual"
+        if n == 1:
+            return "single"
+        return "unavailable"
 
     # ── Helpers ──────────────────────────────────────────────────────────────
+
+    def _idle_robots(self) -> list:
+        """Currently idle robots (IDLE status, no active task)."""
+        return [
+            r for r in self._dispatcher.provider.robots.values()
+            if r.status == IDLE and not r.current_task
+        ]
+
+    def _dispatch_empty_return(self, pou_station: str) -> dict:
+        """Create an empty-rack return task + order row (POU → RECEBIMENTO).
+
+        Must be called while holding self._lock.
+        Reused by both confirm_delivery() (auto dual-dispatch) and
+        request_empty() (manual operator fallback).
+        """
+        receb = config.ERP_RECEBIMENTO_STATION
+        if not pou_station or not receb:
+            return {"ok": False, "error": "no_pou_station"}
+        task = self._dispatcher.create_task(pou_station, receb)
+        if task is None:
+            return {"ok": False, "error": "dispatch_failed"}
+        now = time.time()
+        key = f"empty_return:{uuid.uuid4().hex[:12]}"
+        o = self._blank_order(key)
+        o.update(
+            record_type="EMPTY", record_type_class="empty_return", amr_flagged=1,
+            status="dispatched", pickup_station=pou_station, dropoff_station=receb,
+            task_id=task.id, first_seen_ts=now, dispatched_ts=now, last_seen_ts=now,
+            note="empty rack return",
+        )
+        db.upsert_erp_order(o)
+        self._emit_order(key)
+        return {"ok": True, "order": db.get_erp_order(key)}
 
     def _recent_pou_station(self) -> str | None:
         for o in db.list_erp_orders(50):

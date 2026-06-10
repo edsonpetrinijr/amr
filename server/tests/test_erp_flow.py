@@ -19,6 +19,7 @@ from server.app import main as appmod
 from server.app.dispatcher import Dispatcher
 from server.app.provider import SimProvider
 from server.app.erp import ErpService, load_mapping
+from server.app.models import ENROUTE_PICKUP
 from server.tests.test_erp_filter import make_line
 
 
@@ -95,34 +96,103 @@ def test_end_to_end_flow():
     body = r.get_json()
     assert body["envio_station"] == "BTLOG1"
     assert body["amr_ready"] is True
+    assert body["dispatch_mode"] == "dual"   # 4 robots idle → dual capable
     assert len(body["orders"]) == 3
 
-    # ── confirm-delivery → FIFO oldest dispatched, Sim task created ──────────
+    # ── confirm-delivery → dual dispatch: AMR-A (loaded) + AMR-B (empty) ─────
     n_tasks_before = len(disp.all_tasks())
     r = client.post("/erp/confirm-delivery")
     assert r.status_code == 200
     res = r.get_json()
     assert res["ok"] is True
+    assert res["dispatch_mode"] == "dual"
+
     order = res["order"]
     assert order["status"] == "dispatched"
     assert order["task_id"] is not None
     assert order["pickup_station"] == "BTLOG1"
     assert order["dropoff_station"] == _PN_ROUTE[order["part_number"]]
-    assert len(disp.all_tasks()) == n_tasks_before + 1
-    task = next(t for t in disp.all_tasks() if t.id == order["task_id"])
-    assert task.pickup == "BTLOG1" and task.dropoff == order["dropoff_station"]
+    assert order["note"] is None  # no warning in dual mode
 
-    # ── request-empty → pickup <POU> → dropoff BTLOG1 ────────────────────────
+    # Two new tasks: AMR-A (loaded) + AMR-B (auto empty return)
+    assert len(disp.all_tasks()) == n_tasks_before + 2
+    task_a = next(t for t in disp.all_tasks() if t.id == order["task_id"])
+    assert task_a.pickup == "BTLOG1" and task_a.dropoff == order["dropoff_station"]
+
+    empty_order = res["empty_order"]
+    assert empty_order is not None
+    assert empty_order["record_type_class"] == "empty_return"
+    assert empty_order["pickup_station"] == order["dropoff_station"]  # POU → BTLOG1
+    assert empty_order["dropoff_station"] == "BTLOG1"
+    task_b = next(t for t in disp.all_tasks() if t.id == empty_order["task_id"])
+    assert task_b.pickup == empty_order["pickup_station"]
+    assert task_b.dropoff == "BTLOG1"
+
+    # ── request-empty still works as manual override ──────────────────────────
+    # After dual dispatch, FLBT10TC2 is station-locked by AMR-B, so a second
+    # request-empty targeting the same POU would be refused. Test the
+    # manual fallback in isolation via test_single_amr_fallback.
+
+
+def test_single_amr_fallback():
+    """With only 1 idle robot, confirm-delivery dispatches AMR-A only.
+
+    The loaded-rack task is created and the order note signals
+    'single_amr_mode — empty return pending'. No empty_order in the response.
+    POST /erp/request-empty remains the manual fallback.
+    """
+    lines = [make_line(part="3679579", cell="BT10TC", pou="FLBT10TC2")]
+    client, disp, svc = make_app(lines)
+    svc.poll_once()
+
+    ready = [o for o in db.list_erp_orders(100) if o["status"] == "ready_for_confirmation"]
+    assert len(ready) == 1
+
+    # Simulate exactly 1 idle robot by directly marking the rest as busy.
+    # (The async assign loop isn't running in test; we set robot state manually.)
+    robots = list(disp.provider.robots.values())
+    assert len(robots) >= 2, f"need ≥2 robots in config; got {len(robots)}"
+    for r in robots[1:]:
+        r.status = ENROUTE_PICKUP
+        r.current_task = "dummy_busy"
+
+    assert len(svc._idle_robots()) == 1
+
+    # Confirm dispatch_mode reflects single before the call
+    r = client.get("/erp/orders")
+    assert r.get_json()["dispatch_mode"] == "single"
+
+    n_tasks_before = len(disp.all_tasks())
+    r = client.post("/erp/confirm-delivery")
+    assert r.status_code == 200
+    res = r.get_json()
+    assert res["ok"] is True
+    assert res["dispatch_mode"] == "single"
+    assert res.get("empty_order") is None   # no auto AMR-B in single mode
+
+    order = res["order"]
+    assert order["status"] == "dispatched"
+    assert order["task_id"] is not None
+    assert "single_amr_mode" in (order["note"] or "")
+
+    # Only 1 new task (AMR-A); AMR-B was NOT created
+    assert len(disp.all_tasks()) == n_tasks_before + 1
+
+    # The last robot is now also consumed → 0 idle
+    robots[0].status = ENROUTE_PICKUP        # simulate dispatcher picking it up
+    robots[0].current_task = order["task_id"]
+    assert len(svc._idle_robots()) == 0
+
+    # request-empty queues a T_PENDING task (ok=True) — the dispatcher assigns a
+    # robot once one is free. 409 would only fire if the POU station were locked.
     r = client.post("/erp/request-empty")
     assert r.status_code == 200
     res = r.get_json()
     assert res["ok"] is True
     empty = res["order"]
     assert empty["record_type_class"] == "empty_return"
-    assert empty["pickup_station"] in _PN_ROUTE.values()
+    assert empty["pickup_station"] == order["dropoff_station"]  # FLBT10TC2
     assert empty["dropoff_station"] == "BTLOG1"
-    et = next(t for t in disp.all_tasks() if t.id == empty["task_id"])
-    assert et.pickup == empty["pickup_station"] and et.dropoff == "BTLOG1"
 
 
 def test_confirm_delivery_no_ready_returns_409():
@@ -136,5 +206,6 @@ def test_confirm_delivery_no_ready_returns_409():
 
 if __name__ == "__main__":
     test_end_to_end_flow()
+    test_single_amr_fallback()
     test_confirm_delivery_no_ready_returns_409()
     print("test_erp_flow OK")

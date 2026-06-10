@@ -728,6 +728,7 @@ def erp_orders():
     return jsonify({
         "orders": _erp_service.list_orders(200),
         "amr_ready": _erp_service.amr_ready(),
+        "dispatch_mode": _erp_service.dispatch_mode(),
         "envio_station": config.ERP_ENVIO_STATION,
     })
 
