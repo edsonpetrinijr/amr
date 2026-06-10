@@ -55,6 +55,19 @@
     background:var(--bg); color:var(--muted); font-size:14px; z-index:10; }
   #err { color:#f85149; font-size:12px; white-space:pre-wrap; }
   .hint { position:absolute; left:12px; bottom:10px; color:var(--muted); font-size:11px; }
+  /* Controles ao vivo da orbita */
+  .orbit-ctl { background:#10261a; border:1px solid #234a31; border-radius:6px;
+    padding:10px 11px; margin:0 0 14px; }
+  .orbit-ctl .oc-row { display:flex; justify-content:space-between; align-items:baseline;
+    margin:9px 0 2px; }
+  .orbit-ctl .oc-row:first-of-type { margin-top:0; }
+  .orbit-ctl label { font-size:12px; font-weight:600; }
+  .orbit-ctl .oc-val { font-variant-numeric:tabular-nums; color:var(--accent); font-size:12px; }
+  .orbit-ctl button { width:100%; margin-top:11px; }
+  .orbit-ctl .oc-msg { font-size:11px; margin-top:8px; color:var(--muted); min-height:14px;
+    line-height:1.35; }
+  .orbit-ctl .oc-msg.err { color:#f85149; }
+  .orbit-ctl .oc-msg.ok { color:var(--accent); }
 </style>
 <script type="importmap">
 {
@@ -78,12 +91,44 @@
     <div class="sub">Simulação 3D — gêmeo virtual · órbita de inspeção (cartesiano + IK) · <span style="color:#3fb950">v8-ik</span></div>
     <div class="sub2" id="orbit-info">Órbita IK: carregando…</div>
 
+    <div class="orbit-ctl" id="orbit-ctl">
+      <div class="oc-row"><label>Raio base (m)</label><span class="oc-val" id="ocv-rb">0.28</span></div>
+      <input type="range" id="oc-rb" min="0.10" max="0.40" step="0.01" value="0.28" />
+      <div class="oc-row"><label>Raio topo (m)</label><span class="oc-val" id="ocv-rt">0.18</span></div>
+      <input type="range" id="oc-rt" min="0.10" max="0.40" step="0.01" value="0.18" />
+      <div class="oc-row"><label>Altura inicial Z (m)</label><span class="oc-val" id="ocv-zb">0.10</span></div>
+      <input type="range" id="oc-zb" min="0.05" max="0.45" step="0.01" value="0.10" />
+      <div class="oc-row"><label>Altura final Z (m)</label><span class="oc-val" id="ocv-zt">0.40</span></div>
+      <input type="range" id="oc-zt" min="0.10" max="0.70" step="0.01" value="0.40" />
+      <div class="oc-row"><label>Camadas</label><span class="oc-val" id="ocv-lv">6</span></div>
+      <input type="range" id="oc-lv" min="1" max="12" step="1" value="6" />
+      <div class="oc-row"><label>Pontos/camada</label><span class="oc-val" id="ocv-pp">24</span></div>
+      <input type="range" id="oc-pp" min="6" max="48" step="1" value="24" />
+      <div class="oc-row"><label>Peça X (m)</label><span class="oc-val" id="ocv-cx">0.40</span></div>
+      <input type="range" id="oc-cx" min="-0.80" max="0.80" step="0.01" value="0.40" />
+      <div class="oc-row"><label>Peça Y (m)</label><span class="oc-val" id="ocv-cy">0.40</span></div>
+      <input type="range" id="oc-cy" min="-0.80" max="0.80" step="0.01" value="0.40" />
+      <div class="oc-row"><label>Peça Z (m)</label><span class="oc-val" id="ocv-cz">0.18</span></div>
+      <input type="range" id="oc-cz" min="0.00" max="1.00" step="0.01" value="0.18" />
+      <div class="oc-row"><label>Velocidade simulação</label><span class="oc-val" id="ocv-speed">1.0x</span></div>
+      <input type="range" id="oc-speed" min="0.1" max="10.0" step="0.1" value="1.0" />
+      <button id="oc-apply">Aplicar</button>
+      <button id="oc-optimize">Otimizar posição da peça</button>
+      <div class="oc-msg" id="oc-msg"></div>
+    </div>
+
     <div class="btns">
       <button id="btn-live">● Ao vivo (robô)</button>
     </div>
     <div class="btns">
       <button id="btn-move" class="danger">▶ Mover robô (demo)</button>
       <button id="btn-wave" class="danger">👋 Tchau</button>
+    </div>
+    <div class="btns">
+      <button id="btn-orbit-run" class="danger" disabled>▶ Executar órbita no robô real</button>
+    </div>
+    <div class="btns">
+      <button id="btn-move-part">✋ Mover peça (arrastar no 3D)</button>
     </div>
     <div class="status"><span class="dot" id="dot"></span><span id="stat">Modo manual — sem conexão</span></div>
     <div class="aimbox" id="aimbox">Apontamento: <b id="aimval">—</b></div>
@@ -107,6 +152,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { ColladaLoader } from 'three/addons/loaders/ColladaLoader.js';
 import URDFLoader from 'urdf-loader';
 
@@ -156,7 +202,12 @@ controls.target.copy(partCenter);
 
 let partGroup = null;
 function addMockPart(){
-  if(partGroup) scene.remove(partGroup);
+  // Idempotente: se o grupo ja existe, so reposiciona (preserva o gizmo
+  // anexado e evita reconstruir geometria a cada frame de arrasto).
+  if(partGroup){
+    partGroup.position.copy(partCenter);
+    return;
+  }
   partGroup = new THREE.Group();
   partGroup.position.copy(partCenter);
 
@@ -183,6 +234,57 @@ function addMockPart(){
 // Caminho REAL da ponta: calculado por FK do URDF nas poses resolvidas (IK).
 let orbitPathLine = null;
 let keypointDots = null;
+let orbitPreviewLine = null;
+let orbitPreviewDots = null;
+
+function clearOrbitPreview(){
+  if(orbitPreviewLine){
+    scene.remove(orbitPreviewLine);
+    orbitPreviewLine.geometry.dispose();
+    orbitPreviewLine.material.dispose();
+    orbitPreviewLine = null;
+  }
+  if(orbitPreviewDots){
+    scene.remove(orbitPreviewDots);
+    orbitPreviewDots.geometry.dispose();
+    orbitPreviewDots.material.dispose();
+    orbitPreviewDots = null;
+  }
+}
+
+function buildOrbitPreview(params){
+  clearOrbitPreview();
+  const levels = Math.max(1, Math.floor(params.levels));
+  const ppl = Math.max(6, Math.floor(params.points_per_level));
+  const pts = [];
+  for(let lvl = 0; lvl < levels; lvl++){
+    const t = (levels > 1) ? (lvl / (levels - 1)) : 0;
+    const radius = params.radius_bottom + (params.radius_top - params.radius_bottom) * t;
+    const z = params.z_bottom + (params.z_top - params.z_bottom) * t;
+    let first = null;
+    for(let k = 0; k < ppl; k++){
+      const ang = 2.0 * Math.PI * k / ppl;
+      const x = params.center[0] + radius * Math.cos(ang);
+      const y = params.center[1] + radius * Math.sin(ang);
+      const p = baseToThree(x, y, z);
+      if(!first) first = p.clone();
+      pts.push(p);
+    }
+    if(first) pts.push(first);
+  }
+  if(pts.length < 2) return;
+
+  const lineGeo = new THREE.BufferGeometry().setFromPoints(pts);
+  const lineMat = new THREE.LineBasicMaterial({ color:0xffb454, transparent:true, opacity:0.9 });
+  orbitPreviewLine = new THREE.Line(lineGeo, lineMat);
+  scene.add(orbitPreviewLine);
+
+  const dotGeo = new THREE.BufferGeometry().setFromPoints(pts);
+  const dotMat = new THREE.PointsMaterial({ color:0xffcf70, size:0.010, sizeAttenuation:true });
+  orbitPreviewDots = new THREE.Points(dotGeo, dotMat);
+  scene.add(orbitPreviewDots);
+}
+
 function buildOrbitPath(poses){
   if(!robot || !robot.links['wrist3_Link'] || !poses || !poses.length) return;
   // salva pose atual para restaurar depois
@@ -213,11 +315,15 @@ function buildOrbitPath(poses){
   const dotMat = new THREE.PointsMaterial({ color:0x9ec5ff, size:0.012, sizeAttenuation:true });
   keypointDots = new THREE.Points(dotGeo, dotMat);
   scene.add(keypointDots);
+
+  // Plano IK real carregado: remove qualquer preview pendente.
+  clearOrbitPreview();
 }
 
 let orbitPlanLoaded = false;
-async function loadOrbitPlan(){
-  if(orbitPlanLoaded) return;
+let ocSynced = false;
+async function loadOrbitPlan(force){
+  if(orbitPlanLoaded && !force) return;
   try {
     const r = await fetch('./api/orbit-plan', { cache:'no-store' });
     if(!r.ok) return;
@@ -231,6 +337,23 @@ async function loadOrbitPlan(){
     if(plan.poses && plan.poses.length){
       buildOrbitPath(plan.poses);
       orbitPlanLoaded = true;
+      // sincroniza os sliders de camadas/pontos com o backend (uma vez).
+      if(!ocSynced){
+        if(typeof plan.radius_bottom === 'number'){ const el=document.getElementById('oc-rb'); if(el) el.value=plan.radius_bottom; }
+        if(typeof plan.radius_top === 'number'){ const el=document.getElementById('oc-rt'); if(el) el.value=plan.radius_top; }
+        if(typeof plan.z_bottom === 'number'){ const el=document.getElementById('oc-zb'); if(el) el.value=plan.z_bottom; }
+        if(typeof plan.z_top === 'number'){ const el=document.getElementById('oc-zt'); if(el) el.value=plan.z_top; }
+        if(plan.levels){ const el=document.getElementById('oc-lv'); if(el) el.value=plan.levels; }
+        if(plan.points_per_level){ const el=document.getElementById('oc-pp'); if(el) el.value=plan.points_per_level; }
+        if(plan.center && plan.center.length === 3){
+          const [cx, cy, cz] = plan.center;
+          const ecx=document.getElementById('oc-cx'); if(ecx) ecx.value=cx;
+          const ecy=document.getElementById('oc-cy'); if(ecy) ecy.value=cy;
+          const ecz=document.getElementById('oc-cz'); if(ecz) ecz.value=cz;
+        }
+        if(typeof ocUpdateLabels === 'function') ocUpdateLabels();
+        ocSynced = true;
+      }
       const m = plan.metrics || {};
       const info = document.getElementById('orbit-info');
       if(info && m.n){
@@ -240,6 +363,291 @@ async function loadOrbitPlan(){
     }
   } catch(e){ /* ponte ainda subindo */ }
 }
+
+// ---- controles ao vivo da orbita (POST /api/orbit-config) ----
+const oc = {
+  rb: document.getElementById('oc-rb'), rt: document.getElementById('oc-rt'),
+  zb: document.getElementById('oc-zb'), zt: document.getElementById('oc-zt'),
+  lv: document.getElementById('oc-lv'), pp: document.getElementById('oc-pp'),
+  cx: document.getElementById('oc-cx'), cy: document.getElementById('oc-cy'),
+  cz: document.getElementById('oc-cz'), speed: document.getElementById('oc-speed'),
+};
+const ocMsg = document.getElementById('oc-msg');
+let speedReqSeq = 0;
+function orbitParamsFromControls(){
+  return {
+    radius_bottom: +oc.rb.value,
+    radius_top: +oc.rt.value,
+    z_bottom: +oc.zb.value,
+    z_top: +oc.zt.value,
+    levels: +oc.lv.value,
+    points_per_level: +oc.pp.value,
+    center: [+oc.cx.value, +oc.cy.value, +oc.cz.value],
+  };
+}
+
+function refreshOrbitPreviewFromControls(){
+  const p = orbitParamsFromControls();
+  partCenterBase = [p.center[0], p.center[1], p.center[2]];
+  partCenter.copy(baseToThree(...partCenterBase));
+  addMockPart();
+  buildOrbitPreview(p);
+}
+
+function ocUpdateLabels(){
+  document.getElementById('ocv-rb').textContent = (+oc.rb.value).toFixed(2);
+  document.getElementById('ocv-rt').textContent = (+oc.rt.value).toFixed(2);
+  document.getElementById('ocv-zb').textContent = (+oc.zb.value).toFixed(2);
+  document.getElementById('ocv-zt').textContent = (+oc.zt.value).toFixed(2);
+  document.getElementById('ocv-lv').textContent = oc.lv.value;
+  document.getElementById('ocv-pp').textContent = oc.pp.value;
+  document.getElementById('ocv-cx').textContent = (+oc.cx.value).toFixed(2);
+  document.getElementById('ocv-cy').textContent = (+oc.cy.value).toFixed(2);
+  document.getElementById('ocv-cz').textContent = (+oc.cz.value).toFixed(2);
+  document.getElementById('ocv-speed').textContent = (+oc.speed.value).toFixed(1) + 'x';
+}
+
+async function applySimSpeed(showMsg=false){
+  const mySeq = ++speedReqSeq;
+  // resposta instantanea no playback local: aplica a velocidade ja agora,
+  // sem esperar o round-trip + proximo fetch de /api/orbit-runtime.
+  if(simRuntime) simRuntime.simSpeed = +oc.speed.value;
+  try {
+    const r = await fetch('./api/sim-speed', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ sim_speed: +oc.speed.value }), cache:'no-store',
+    });
+    const j = await r.json().catch(() => ({}));
+    if(mySeq !== speedReqSeq) return;
+    if(!r.ok || !j.ok){
+      if(showMsg){
+        ocMsg.className = 'oc-msg err';
+        ocMsg.textContent = (j && j.msg) ? j.msg : ('erro ' + r.status);
+      }
+      return;
+    }
+    if(showMsg){
+      ocMsg.className = 'oc-msg ok';
+      ocMsg.textContent = 'velocidade aplicada';
+    }
+  } catch(e){
+    if(showMsg){
+      ocMsg.className = 'oc-msg err';
+      ocMsg.textContent = 'falha de rede: ' + e;
+    }
+  }
+}
+
+async function syncSimSpeedFromServer(){
+  try {
+    const r = await fetch('./api/orbit-status', { cache:'no-store' });
+    if(!r.ok) return;
+    const s = await r.json();
+    if(typeof s.sim_speed === 'number' && oc.speed){
+      oc.speed.value = String(s.sim_speed);
+      ocUpdateLabels();
+    }
+  } catch(e){ /* ignore */ }
+}
+let ocBusy = false, ocPending = false;
+async function applyOrbitConfig(){
+  if(ocBusy){ ocPending = true; return; }   // coalesce: roda 1 vez de cada vez
+  ocBusy = true;
+  ocMsg.className = 'oc-msg'; ocMsg.textContent = 'recalculando órbita…';
+  const body = orbitParamsFromControls();
+  try {
+    const r = await fetch('./api/orbit-config', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body), cache:'no-store',
+    });
+    const j = await r.json().catch(() => ({}));
+    if(!r.ok || !j.ok){
+      // 400 = parametros invalidos/fora de faixa (estado anterior preservado).
+      ocMsg.className = 'oc-msg err';
+      ocMsg.textContent = (j && j.msg) ? j.msg : ('erro ' + r.status);
+      return;
+    }
+    // recalculo roda em background: faz polling do status ate ficar pronto.
+    const m = await pollOrbitStatus();
+    if(m && m.error){
+      ocMsg.className = 'oc-msg err';
+      ocMsg.textContent = m.error;
+    } else {
+      await loadOrbitPlan(true);             // redesenha o caminho verde
+      const mm = (m && m.metrics) || {};
+      ocMsg.className = 'oc-msg ok';
+      if(mm.n){
+        ocMsg.textContent = `OK: ${mm.n} pts · ${(mm.frac_within_3deg*100).toFixed(0)}% ≤3° · ` +
+          `pos ${mm.mean_pos_err_mm.toFixed(1)} mm · apont. máx ${mm.max_point_err_deg.toFixed(1)}°` +
+          (mm.calc_ms ? ` · ${mm.calc_ms} ms` : '');
+      } else {
+        ocMsg.textContent = 'órbita atualizada';
+      }
+    }
+  } catch(e){
+    ocMsg.className = 'oc-msg err';
+    ocMsg.textContent = 'falha de rede: ' + e;
+  } finally {
+    ocBusy = false;
+    if(ocPending){ ocPending = false; applyOrbitConfig(); }
+  }
+}
+
+// Aguarda o worker de background terminar o recalculo (status "pronto"/"erro").
+async function pollOrbitStatus(timeoutMs = 120000){
+  const t0 = Date.now();
+  while(Date.now() - t0 < timeoutMs){
+    await new Promise(res => setTimeout(res, 250));
+    try {
+      const r = await fetch('./api/orbit-status', { cache:'no-store' });
+      if(!r.ok) continue;
+      const s = await r.json();
+      if(s.status === 'pronto') return { metrics: s.metrics };
+      if(s.status === 'erro')   return { error: s.error || 'falha ao recalcular' };
+    } catch(e){ /* ponte ocupada; tenta de novo */ }
+  }
+  return { error: 'tempo esgotado recalculando' };
+}
+
+// Poller leve: mantem `orbitReady` espelhando o status do servidor.
+// Usado para habilitar/desabilitar o botao "Executar no robo real".
+async function refreshOrbitReady(){
+  try {
+    const r = await fetch('./api/orbit-status', { cache:'no-store' });
+    if(!r.ok) return;
+    const s = await r.json();
+    orbitReady = (s && s.status === 'pronto');
+    // Erro vindo do worker (ex.: pose fora dos soft limits do controlador)
+    // tem que aparecer no painel mesmo sem o usuario ter apertado Aplicar.
+    if(s && s.status === 'erro' && s.error && !ocBusy){
+      ocMsg.className = 'oc-msg err';
+      ocMsg.textContent = s.error;
+    }
+  } catch(e){ /* ignora */ }
+}
+setInterval(refreshOrbitReady, 1000);
+setTimeout(refreshOrbitReady, 400);
+[oc.rb, oc.rt, oc.zb, oc.zt, oc.lv, oc.pp, oc.cx, oc.cy, oc.cz].forEach(el => el.addEventListener('input', () => {
+  ocUpdateLabels();
+  refreshOrbitPreviewFromControls();
+  if(!ocBusy){
+    ocMsg.className = 'oc-msg';
+    ocMsg.textContent = 'alteracoes pendentes (clique em Aplicar)';
+  }
+}));
+oc.speed.addEventListener('input', () => {
+  ocUpdateLabels();
+  applySimSpeed(false);
+});
+oc.speed.addEventListener('change', () => {
+  applySimSpeed(true);
+});
+document.getElementById('oc-apply').addEventListener('click', () => {
+  applyOrbitConfig();
+});
+
+// ---- gizmo: ARRASTAR A PEÇA DIRETO NO 3D ----
+// Anexa um TransformControls (setas XYZ) ao partGroup. Enquanto arrasta,
+// reflete o centro nos sliders e refaz o preview leve. Ao soltar, dispara
+// applyOrbitConfig para o backend recalcular a órbita IK.
+const gizmo = new TransformControls(camera, renderer.domElement);
+gizmo.setMode('translate');
+gizmo.setSize(0.9);
+gizmo.visible = false;
+gizmo.enabled = false;
+scene.add(gizmo);
+// Desabilita OrbitControls enquanto a pessoa arrasta o gizmo.
+gizmo.addEventListener('dragging-changed', e => {
+  controls.enabled = !e.value;
+  if(!e.value){
+    // Soltou: persiste no backend (recalcula IK).
+    applyOrbitConfig();
+  }
+});
+function clamp(v, lo, hi){ return Math.min(hi, Math.max(lo, v)); }
+gizmo.addEventListener('change', () => {
+  if(!gizmo.object) return;
+  // Inverso de baseToThree(x, y, z) = (x, z, -y):
+  //   x_base = three.x ; y_base = -three.z ; z_base = three.y
+  const p = gizmo.object.position;
+  const cx = p.x;
+  const cy = -p.z;
+  const cz = p.y;
+  // Estende automaticamente o range do slider se o usuario passar do limite
+  // visual; o backend ainda valida seguranca (chao, esfera da peca, soft
+  // limits do controlador) ao recalcular a orbita.
+  const grow = (el, val) => {
+    const lo = +el.min, hi = +el.max;
+    if(val < lo) el.min = String(Math.floor(val * 10) / 10);
+    if(val > hi) el.max = String(Math.ceil(val * 10) / 10);
+  };
+  grow(oc.cx, cx); grow(oc.cy, cy); grow(oc.cz, cz);
+  oc.cx.value = cx.toFixed(3);
+  oc.cy.value = cy.toFixed(3);
+  oc.cz.value = cz.toFixed(3);
+  partCenterBase = [cx, cy, cz];
+  partCenter.copy(baseToThree(cx, cy, cz));
+  ocUpdateLabels();
+  // Preview leve (cartesiano, sem IK) ja atualiza enquanto arrasta.
+  buildOrbitPreview(orbitParamsFromControls());
+  if(!ocBusy){
+    ocMsg.className = 'oc-msg';
+    ocMsg.textContent = 'arrastando peça… solte para aplicar';
+  }
+});
+const movePartBtn = document.getElementById('btn-move-part');
+function setPartEditMode(on){
+  if(on && partGroup){
+    gizmo.attach(partGroup);
+    gizmo.visible = true; gizmo.enabled = true;
+    movePartBtn.classList.add('on');
+    movePartBtn.textContent = '✕ Sair do modo mover peça';
+  } else {
+    gizmo.detach();
+    gizmo.visible = false; gizmo.enabled = false;
+    movePartBtn.classList.remove('on');
+    movePartBtn.textContent = '✋ Mover peça (arrastar no 3D)';
+  }
+}
+movePartBtn.addEventListener('click', () => {
+  const turningOn = !gizmo.enabled;
+  if(turningOn && !partGroup) addMockPart();
+  setPartEditMode(turningOn);
+});
+
+async function optimizeOrbitCenter(){
+  if(ocBusy) return;
+  ocBusy = true;
+  ocMsg.className = 'oc-msg';
+  ocMsg.textContent = 'otimizando posição da peça…';
+  try {
+    const r = await fetch('./api/orbit-optimize', { method:'POST', cache:'no-store' });
+    const j = await r.json().catch(() => ({}));
+    if(!r.ok || !j.ok){
+      ocMsg.className = 'oc-msg err';
+      ocMsg.textContent = (j && j.msg) ? j.msg : ('erro ' + r.status);
+      return;
+    }
+    const m = await pollOrbitStatus();
+    if(m && m.error){
+      ocMsg.className = 'oc-msg err';
+      ocMsg.textContent = m.error;
+      return;
+    }
+    ocSynced = false; // força sync dos sliders com o novo center retornado
+    await loadOrbitPlan(true);
+    ocMsg.className = 'oc-msg ok';
+    ocMsg.textContent = 'posição da peça otimizada e aplicada';
+  } catch(e){
+    ocMsg.className = 'oc-msg err';
+    ocMsg.textContent = 'falha de rede: ' + e;
+  } finally {
+    ocBusy = false;
+  }
+}
+document.getElementById('oc-optimize').addEventListener('click', optimizeOrbitCenter);
+ocUpdateLabels();
+syncSimSpeedFromServer();
 
 addMockPart();
 
@@ -311,14 +719,20 @@ function buildPanel(){
   });
 }
 
-function applyJoints(){
-  if(!robot) return;
+function syncJointHud(){
   JOINTS.forEach(j => {
-    if(robot.joints[j]) robot.joints[j].setJointValue(deg2rad(state[j]));
     const v = document.getElementById('v-'+j);
     if(v) v.textContent = state[j].toFixed(1)+'°';
     if(sliders[j]) sliders[j].value = state[j];
   });
+}
+
+function applyJoints(updateHud=true){
+  if(!robot) return;
+  JOINTS.forEach(j => {
+    if(robot.joints[j]) robot.joints[j].setJointValue(deg2rad(state[j]));
+  });
+  if(updateHud) syncJointHud();
   updateTCP();
 }
 
@@ -356,7 +770,11 @@ buildPanel();
 
 // ---- modo ao vivo: espelha o robô real via /api/joints ----
 let live = false;
-let pollTimer = null;
+let pollLoopRun = 0;
+let pollInFlight = false;
+let lastFrameMs = performance.now();
+let lastHudMs = 0;
+const liveTarget = { ...HOME };
 const dot = document.getElementById('dot');
 const statEl = document.getElementById('stat');
 const liveBtn = document.getElementById('btn-live');
@@ -364,22 +782,32 @@ const camBox = document.getElementById('cambox');
 const camImg = document.getElementById('cam');
 const moveBtn = document.getElementById('btn-move');
 const waveBtn = document.getElementById('btn-wave');
+const orbitRunBtn = document.getElementById('btn-orbit-run');
 const moveBanner = document.getElementById('movebanner');
 const moveMsg = document.getElementById('movemsg');
+let orbitReady = false;          // ultima orbita esta com status 'pronto'
 
 function setSlidersDisabled(d){
   JOINTS.forEach(j => { if(sliders[j]) sliders[j].disabled = d; });
 }
 
 async function poll(){
+  if(pollInFlight) return;  // evita empilhar requests e jitter por backlog
+  pollInFlight = true;
   try {
     const r = await fetch('./api/joints', { cache:'no-store' });
     if(!r.ok) throw new Error('HTTP '+r.status);
     const d = await r.json();
-    if(d.joints && d.joints.length === 6){
-      JOINTS.forEach((j,i) => state[j] = d.joints[i]);
-      applyJoints();
+    // Em modo simulate, o playback acontece LOCAL no rAF (sem jitter de rede).
+    // Nao sobrescrevemos liveTarget aqui para nao introduzir trancos.
+    if(d.joints && d.joints.length === 6 && d.source !== 'simulate'){
+      JOINTS.forEach((j,i) => liveTarget[j] = d.joints[i]);
+      if(!live) {
+        JOINTS.forEach((j,i) => state[j] = d.joints[i]);
+        applyJoints();
+      }
     }
+    simulateMode = (d.source === 'simulate');
     if(d.ok){
       dot.className = 'dot live';
       const fonte = d.source === 'simulate' ? 'simulado' : 'robô';
@@ -397,14 +825,91 @@ async function poll(){
       moveBanner.classList.add('show');
       moveMsg.textContent = 'Robô em movimento… ' + (d.move_msg || '');
       moveBtn.disabled = true; waveBtn.disabled = true;
+      orbitRunBtn.disabled = true;
     } else {
       moveBanner.classList.remove('show');
       moveBtn.disabled = false; waveBtn.disabled = false;
+      // orbit-run só quando robô real conectado E orbita pronta
+      orbitRunBtn.disabled = simulateMode || !orbitReady;
     }
   } catch(e){
     dot.className = 'dot err';
     statEl.textContent = 'Ponte offline — rode  bridge.py';
+  } finally {
+    pollInFlight = false;
   }
+}
+
+async function livePollLoop(runId){
+  while(live && runId === pollLoopRun){
+    await poll();
+    await new Promise(res => setTimeout(res, 8));
+  }
+}
+
+// ---- playback LOCAL do --simulate (sem polling no caminho critico) ----
+// O backend expoe a sequencia + velocidade base via /api/orbit-runtime; aqui
+// avancamos a fase em rAF (60+ Hz, sem jitter de rede) e interpolamos com
+// Catmull-Rom. Em ALTA velocidade o movimento fica continuo de verdade.
+let simulateMode = false;       // ultimo source observado em /api/joints
+let simRuntime = null;          // { sequence, version, basePps, simSpeed }
+let simPhase = 0;
+let simRuntimeBusy = false;
+
+async function fetchSimRuntime(){
+  if(simRuntimeBusy) return;
+  simRuntimeBusy = true;
+  try {
+    const r = await fetch('./api/orbit-runtime', { cache:'no-store' });
+    if(!r.ok) return;
+    const d = await r.json();
+    if(!d.simulate || !d.sequence || !d.sequence.length) return;
+    const prevVersion = simRuntime ? simRuntime.version : -1;
+    simRuntime = {
+      sequence: d.sequence,
+      version: d.version,
+      basePps: d.base_points_per_sec || 5.0,
+      simSpeed: d.sim_speed != null ? d.sim_speed : 1.0,
+    };
+    if(d.version !== prevVersion) simPhase = 0;
+  } catch(e){ /* tenta de novo no proximo ciclo */ }
+  finally { simRuntimeBusy = false; }
+}
+
+// Polling LEVE de runtime: so para pegar troca de sequencia/velocidade (sem
+// custo perceptivel, e nao bloqueia o movimento que ja roda local).
+setInterval(() => { if(live && simulateMode) fetchSimRuntime(); }, 500);
+setTimeout(fetchSimRuntime, 200);
+
+function _catmullRom(p0, p1, p2, p3, t){
+  const t2 = t * t, t3 = t2 * t;
+  return 0.5 * (
+    (2.0 * p1)
+    + (-p0 + p2) * t
+    + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
+    + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3
+  );
+}
+
+function advanceSimPlayback(dt){
+  if(!simRuntime || !simRuntime.sequence) return false;
+  const seq = simRuntime.sequence;
+  const n = seq.length;
+  if(n < 2) return false;
+  const speed = simRuntime.simSpeed || 1.0;
+  const pps = (simRuntime.basePps || 5.0) * Math.max(0.1, Math.min(10.0, speed));
+  simPhase = (simPhase + pps * dt) % n;
+  const i1 = Math.floor(simPhase) % n;
+  const i0 = (i1 - 1 + n) % n;
+  const i2 = (i1 + 1) % n;
+  const i3 = (i1 + 2) % n;
+  const a = simPhase - Math.floor(simPhase);
+  const p0 = seq[i0], p1 = seq[i1], p2 = seq[i2], p3 = seq[i3];
+  JOINTS.forEach((j,k) => {
+    state[j] = _catmullRom(p0[k], p1[k], p2[k], p3[k], a);
+  });
+  applyJoints(false);
+  return true;
 }
 
 function setLive(on){
@@ -413,14 +918,15 @@ function setLive(on){
   liveBtn.textContent = on ? '■ Parar (manual)' : '● Ao vivo (robô)';
   setSlidersDisabled(on);
   if(on){
-    poll();
-    pollTimer = setInterval(poll, 33);   // ~30 Hz para visual mais fluido
+    pollLoopRun += 1;
+    livePollLoop(pollLoopRun);
   } else {
-    clearInterval(pollTimer); pollTimer = null;
+    pollLoopRun += 1;
     dot.className = 'dot';
     statEl.textContent = 'Modo manual — sem conexão';
     camBox.style.display = 'none';
     camImg.src = '';
+    syncJointHud();
   }
 }
 
@@ -463,6 +969,49 @@ waveBtn.onclick = () => startMove('./api/wave',
   'Ele levanta a "mão" e balança o punho de um lado pro outro, depois volta.\n' +
   'Garanta que a área ao redor do robô está LIVRE.\n\nContinuar?');
 
+// ---- botão: EXECUTAR ÓRBITA NO ROBÔ REAL ----
+// Reusa a mesma sequência IK mostrada no viewer. Confirmação dupla + escolha
+// de velocidade conservadora (5..25%). Backend valida limites URDF + chão +
+// esfera da peça antes de mover, e MoveJ é bloqueante pose a pose.
+async function startOrbitRun(){
+  if(orbitRunBtn.disabled) return;
+  const warn = '⚠ ATENÇÃO: isto vai EXECUTAR A ÓRBITA NO ROBÔ REAL.\n\n' +
+    'O braço vai percorrer toda a sequência mostrada na simulação.\n' +
+    'Garanta que a área está LIVRE e mantenha o E-STOP à mão.\n\nContinuar?';
+  if(!confirm(warn)) return;
+  const velStr = prompt('Velocidade MoveJ em % (5–25, conservador):', '15');
+  if(velStr === null) return;
+  const vel = parseFloat(velStr);
+  if(!isFinite(vel) || vel < 5 || vel > 25){
+    alert('Velocidade inválida. Use um valor entre 5 e 25.');
+    return;
+  }
+  if(!live) setLive(true);
+  orbitRunBtn.disabled = true;
+  moveBtn.disabled = true; waveBtn.disabled = true;
+  moveBanner.classList.add('show');
+  moveMsg.textContent = 'Iniciando órbita…';
+  try {
+    const r = await fetch('./api/orbit-run', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ vel }), cache:'no-store',
+    });
+    const d = await r.json().catch(() => ({}));
+    if(!r.ok || !d.ok || d.started === false){
+      moveMsg.textContent = (d && d.msg) ? d.msg : ('erro ' + r.status);
+      setTimeout(() => moveBanner.classList.remove('show'), 3000);
+      moveBtn.disabled = false; waveBtn.disabled = false;
+      orbitRunBtn.disabled = simulateMode || !orbitReady;
+    }
+  } catch(e){
+    moveMsg.textContent = 'erro: ponte offline';
+    moveBtn.disabled = false; waveBtn.disabled = false;
+    orbitRunBtn.disabled = simulateMode || !orbitReady;
+    setTimeout(() => moveBanner.classList.remove('show'), 3000);
+  }
+}
+orbitRunBtn.onclick = startOrbitRun;
+
 // ---- loop / resize ----
 function resize(){
   const w = viewEl.clientWidth, h = viewEl.clientHeight;
@@ -474,6 +1023,34 @@ resize();
 
 (function animate(){
   requestAnimationFrame(animate);
+  const now = performance.now();
+  const dt = Math.min(0.05, (now - lastFrameMs) / 1000.0);
+  lastFrameMs = now;
+
+  // Modo simulate: playback LOCAL em rAF (sem jitter de polling).
+  if(live && robot && simulateMode && simRuntime){
+    const ok = advanceSimPlayback(dt);
+    if(ok){
+      if(now - lastHudMs > 120){ syncJointHud(); lastHudMs = now; }
+      controls.update();
+      renderer.render(scene, camera);
+      return;
+    }
+  }
+
+  // Suaviza o espelhamento ao vivo para evitar "trancos" por jitter de rede.
+  if(live && robot){
+    const tau = 0.14;                              // mais suave/contínuo
+    const alpha = 1 - Math.exp(-dt / tau);        // filtro de 1a ordem estável em dt
+    JOINTS.forEach(j => {
+      state[j] = state[j] + (liveTarget[j] - state[j]) * alpha;
+    });
+    applyJoints(false);
+    if(now - lastHudMs > 120){
+      syncJointHud();
+      lastHudMs = now;
+    }
+  }
   controls.update();
   renderer.render(scene, camera);
 })();

@@ -30,6 +30,10 @@ class RobotScanner(abc.ABC):
     def disconnect(self) -> None:
         pass
 
+    def validate_scan_poses(self, poses: List[List[float]]) -> None:
+        """No-op por padrao; FairinoRobot sobrescreve com a checagem real."""
+        pass
+
 
 class FairinoRobot(RobotScanner):
     def __init__(self, ip: str = "192.168.58.2"):
@@ -73,7 +77,107 @@ class FairinoRobot(RobotScanner):
         ret = self.robot.MoveJ(list(joints), tool=tool, user=user, vel=vel)
         if ret not in (0, None):
             raise RuntimeError(f"MoveJ falhou, codigo {ret}")
+        # MoveJ pode retornar antes do movimento concluir neste firmware:
+        # poll ate a junta chegar perto do alvo (ou levantar erro/timeout).
+        self._wait_joints_reached(joints)
         return 0 if ret is None else ret
+
+    def move_joints_blend(self, joints: List[float], vel: float,
+                          tool: int = 0, user: int = 0,
+                          blend_ms: float = 200.0) -> int:
+        """MoveJ NAO-BLOQUEANTE (blendT>0): so enfileira o waypoint.
+
+        A fluidez vem de enfileirar o PROXIMO ponto enquanto o robo ainda esta
+        executando o atual; o controlador faz a mistura. NAO espere chegar.
+        Use wait_motion_done() apos a sequencia para garantir conclusao.
+        """
+        ret = self.robot.MoveJ(list(joints), tool=tool, user=user, vel=vel,
+                               blendT=float(blend_ms))
+        if ret not in (0, None):
+            raise RuntimeError(f"MoveJ(blend) falhou, codigo {ret}")
+        self._check_no_fault()
+        return 0
+
+    def wait_motion_done(self, timeout_s: float = 60.0,
+                          poll_s: float = 0.05) -> None:
+        """Espera o controlador esvaziar a fila de movimento."""
+        deadline = time.time() + timeout_s
+        # GetRobotMotionDone retorna (0, 1) quando parou.
+        while time.time() < deadline:
+            try:
+                res = self.robot.GetRobotMotionDone()
+                if isinstance(res, tuple) and res[0] == 0 and int(res[1]) == 1:
+                    return
+            except Exception:
+                pass
+            self._check_no_fault()
+            time.sleep(poll_s)
+        raise TimeoutError(f"motion nao concluiu em {timeout_s}s")
+
+    # ---------------------------------------------------------------------- #
+    # Conclusao de movimento + checagem de falha
+    # ---------------------------------------------------------------------- #
+    def _wait_joints_reached(self, target: List[float],
+                              tol_deg: float = 0.5,
+                              timeout_s: float = 15.0) -> None:
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            res = self.robot.GetActualJointPosDegree(1)
+            if isinstance(res, tuple) and res[0] == 0:
+                cur = list(res[1])
+                if all(abs(cur[i] - target[i]) <= tol_deg for i in range(len(target))):
+                    return
+            self._check_no_fault()
+            time.sleep(0.05)
+        raise TimeoutError(
+            f"MoveJ nao concluiu em {timeout_s}s; alvo={[round(v, 1) for v in target]}")
+
+    def _check_no_fault(self) -> None:
+        try:
+            res = self.robot.GetRobotErrorCode()
+            if not (isinstance(res, tuple) and res[0] == 0):
+                return
+            codes = res[1] if hasattr(res[1], "__iter__") else [res[1]]
+            if any(c != 0 for c in codes):
+                raise RuntimeError(f"Falha do controlador durante movimento: codigos {list(codes)}")
+        except RuntimeError:
+            raise
+        except Exception:
+            pass
+
+    # ---------------------------------------------------------------------- #
+    # Validacao contra soft limits do controlador (defesa em profundidade).
+    # ---------------------------------------------------------------------- #
+    def validate_scan_poses(self, poses: List[List[float]]) -> None:
+        """Levanta ValueError se qualquer pose viola os soft limits das juntas.
+
+        GetJointSoftLimitDeg retorna lista plana de 12 valores:
+        [neg1, pos1, neg2, pos2, ..., neg6, pos6].
+        """
+        try:
+            res = self.robot.GetJointSoftLimitDeg(1)
+        except Exception as exc:
+            print(f"[warn] Nao foi possivel ler soft limits: {exc}")
+            return
+        if not (isinstance(res, tuple) and res[0] == 0 and len(res) >= 2):
+            print(f"[warn] GetJointSoftLimitDeg retornou formato inesperado: {res!r}")
+            return
+        try:
+            flat = [float(x) for x in res[1]]
+            if len(flat) < 12:
+                print(f"[warn] Soft limits incompletos ({len(flat)} valores); pulando")
+                return
+            lim_pairs = [(flat[i * 2], flat[i * 2 + 1]) for i in range(6)]
+        except Exception as exc:
+            print(f"[warn] Nao foi possivel parsear soft limits ({res[1]!r}): {exc}")
+            return
+        for p_idx, pose in enumerate(poses):
+            for j, (val, (lo, hi)) in enumerate(zip(pose, lim_pairs)):
+                if not (lo - 1e-3 <= val <= hi + 1e-3):
+                    raise ValueError(
+                        f"Pose #{p_idx}: j{j + 1}={val:.2f}° fora dos soft limits "
+                        f"[{lo:.2f}, {hi:.2f}]. Ajuste raios/altura/centro da peca."
+                    )
 
     @staticmethod
     def _ok(res):

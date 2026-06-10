@@ -27,6 +27,7 @@ from sim.orbit_ik import (
     orbit_joint_sequence,
     urdf_joint_limits_deg,
     validate_sequence_limits,
+    validate_sequence_safety,
 )
 from vision.robot_scan import FairinoRobot, MockRobot
 
@@ -41,6 +42,10 @@ def build_params(args) -> OrbitParams:
         p.levels = args.levels
     if args.points_per_level is not None:
         p.points_per_level = args.points_per_level
+    if args.z_floor is not None:
+        p.z_floor = args.z_floor
+    if args.r_safe is not None:
+        p.r_safe = args.r_safe
     return p
 
 
@@ -57,6 +62,13 @@ def main():
     ap.add_argument("--radius-top", type=float, default=None)
     ap.add_argument("--levels", type=int, default=None)
     ap.add_argument("--points-per-level", type=int, default=None)
+    ap.add_argument("--z-floor", type=float, default=None,
+                    help="Margem de seguranca acima do chao (m); default 0.02")
+    ap.add_argument("--r-safe", type=float, default=None,
+                    help="Raio da esfera de seguranca da peca (m); default 0.06")
+    ap.add_argument("--force-unsafe-test", action="store_true",
+                    help="Auto-teste: injeta uma pose insegura para provar que "
+                         "o gate de seguranca ABORTA sem mover (nao usar em prod)")
     args = ap.parse_args()
 
     # 1) Gera a sequencia (single source of truth, identica ao sim).
@@ -65,11 +77,25 @@ def main():
     seq = orbit_joint_sequence(params)
     print(f"      {len(seq)} poses de junta (densificadas, passos <= ~6 deg)")
 
+    if args.force_unsafe_test:
+        # Pose claramente insegura (cadeia estendida para baixo do chao) para
+        # validar que o gate de seguranca a rejeita ANTES de qualquer movimento.
+        seq = list(seq) + [[0.0, 80.0, 0.0, 0.0, 0.0, 0.0]]
+        print("      [force-unsafe-test] pose insegura injetada no fim da seq")
+
     # 2) Valida contra os limites do URDF (vale em mock e real).
     print("[2/4] Validando poses contra os limites de junta do URDF...")
     limits = urdf_joint_limits_deg()
     validate_sequence_limits(seq, limits)
     print("      OK: todas as poses dentro dos limites do URDF")
+
+    # 2b) GATE DE SEGURANCA geometrica: chao + esfera da peca. Aborta se
+    #     QUALQUER pose furar o chao ou invadir a peca (mesma checagem do sim).
+    print("[2b ] Validando SEGURANCA geometrica (chao + peca)...")
+    validate_sequence_safety(seq, params.center,
+                             z_floor=params.z_floor, r_safe=params.r_safe)
+    print(f"      OK: todas as poses seguras "
+          f"(z_floor={params.z_floor} m, r_safe={params.r_safe} m)")
 
     if not seq:
         print("      Nenhuma pose gerada; abortando.")

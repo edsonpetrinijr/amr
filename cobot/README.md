@@ -23,9 +23,12 @@ O SDK `fairino` já está na pasta — não precisa instalar.
 
 ## O sistema de visão (eye-in-hand)
 
-Câmera USB montada na **ponta do robô**. O robô **rotaciona** (varre uma junta) e,
-em cada ângulo, captura um frame e checa se a peça está na **posição certa**
-(o diferencial). Quando está, captura a imagem final e roda a análise.
+Câmera USB montada na **ponta do robô**. O robô faz uma varredura angular da
+câmera para encontrar a peça na **posição certa** (o diferencial). No modo atual
+recomendado, a câmera faz uma órbita em **anéis empilhados**: começa embaixo
+(nível da base) com círculo maior, sobe por níveis e reduz o círculo até o topo,
+aproximando uma meia-esfera ao redor da peça. Quando encontra a posição certa,
+captura a imagem final e roda a análise.
 
 ### Como a "posição certa" é detectada
 
@@ -48,8 +51,14 @@ modelo treinado, YOLO, etc.), implemente a interface `PartDetector` em
 python scan_and_inspect.py --simulate
 ```
 
-Roda 100% simulado (robô e câmera virtuais) e prova o fluxo: varre, encontra,
+Roda 100% simulado (robô e câmera virtuais) e prova o fluxo: orbita, encontra,
 captura e salva `captures/peca_*.png` + `.json`.
+
+Para forçar o modo legado de varredura em 1 junta:
+
+```powershell
+python scan_and_inspect.py --simulate --scan-mode single
+```
 
 ### 2. Preparar o marcador
 
@@ -63,15 +72,21 @@ Imprima `marker_DICT_4X4_50_id0.png` e cole na peça.
 
 ```powershell
 python scan_and_inspect.py
-# opcoes: --ip 192.168.58.2 --camera 0 --marker-id 0
+# opcoes: --ip 192.168.58.2 --camera 0 --marker-id 0 --scan-mode orbit
 ```
 
 Saída: imagem + JSON de análise em `captures/`.
 
 ## Ajustes principais (`vision/config.py`)
 
-- `scan_joint` — qual junta gira a câmera (5 = j6/flange, 0 = j1/base).
-- `scan_start_deg` / `scan_end_deg` / `scan_step_deg` — amplitude e passo da varredura.
+- `scan_mode` — `orbit` (meia-esfera em 2 juntas) ou `single` (varredura legada).
+- `orbit_pan_joint` / `orbit_tilt_joint` — juntas usadas na órbita (pan + tilt).
+- `orbit_levels` — quantos níveis/subidas a órbita terá.
+- `orbit_points_per_level` — quantos pontos por círculo em cada nível.
+- `orbit_radius_bottom_deg` / `orbit_radius_top_deg` — círculo maior embaixo e menor no topo.
+- `orbit_tilt_bottom_deg` / `orbit_tilt_top_deg` — altura angular do primeiro e último nível.
+- `orbit_enable_lookat_comp` / `orbit_lookat_joint` / `orbit_lookat_gain` — compensação opcional para manter a câmera apontando ao centro durante pan.
+- `scan_joint` e `scan_*` — parâmetros do modo legado (`single`).
 - `settle_time_s` — espera após mover antes de capturar (evita borrão).
 - `center_tol_px` / `min_marker_size_px` — rigor do critério de "posição certa".
 - `target_marker_id` / `aruco_dict` — marcador alvo.
