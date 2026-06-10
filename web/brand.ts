@@ -4,6 +4,12 @@
 
 export const BRAND = "FluxoFleet"
 
+// Category + elevator copy — aligned with docs/POSITIONING.md.
+export const TAGLINE = "Orchestration Engine para AMRs industriais"
+export const ELEVATOR =
+  "FluxoFleet é o motor de orquestração que coordena frotas de AMRs industriais " +
+  "com confirmação física e recuperação automática de falhas — sem parar a linha."
+
 export const CONTACT_EMAIL = "piloto@fluxofleet.com"
 
 // Leave empty to hide the WhatsApp CTA. Set to a full https://wa.me/... URL to show it.

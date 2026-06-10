@@ -1,10 +1,11 @@
 import React from "react"
 import {
   ArrowRight, CheckCircle2, ShieldCheck, Workflow, Plug, History,
-  AlertTriangle, OctagonX, Hand, MapPin, Radio, MonitorPlay,
-  Image as ImageIcon, Film,
+  AlertTriangle, Hand, MapPin, Radio, MonitorPlay,
+  Image as ImageIcon, Film, Telescope, PlayCircle,
+  Factory, LineChart, Wrench, Wallet, Cpu, Globe, PackageCheck,
 } from "lucide-react"
-import { BRAND, CONTACT_EMAIL, WHATSAPP_URL, PILOT_MAILTO } from "./brand"
+import { BRAND, CONTACT_EMAIL, WHATSAPP_URL, PILOT_MAILTO, TAGLINE } from "./brand"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Marketing landing page (v1) — standalone public route, no operator chrome.
@@ -14,11 +15,11 @@ import { BRAND, CONTACT_EMAIL, WHATSAPP_URL, PILOT_MAILTO } from "./brand"
 // ─────────────────────────────────────────────────────────────────────────────
 
 const NAV = [
+  { label: "Os 5 Pilares", href: "#pilares" },
   { label: "Como funciona", href: "#como-funciona" },
-  { label: "Integrações", href: "#integracoes" },
-  { label: "Segurança", href: "#seguranca" },
+  { label: "Diferenciação", href: "#diferenciacao" },
+  { label: "Caso de uso", href: "#caso-de-uso" },
   { label: "Piloto", href: "#piloto" },
-  { label: "FAQ", href: "#faq" },
 ]
 
 /** Primary CTA — opens a pre-filled email. Repeated 2–3x down the page. */
@@ -41,6 +42,32 @@ function CtaButton({
     >
       {label}
       <ArrowRight className="h-4 w-4" />
+    </a>
+  )
+}
+
+/** Secondary CTA — anchors within the page (e.g. the pilot use-case). */
+function SecondaryCta({
+  label,
+  href,
+  className = "",
+}: {
+  label: string
+  href: string
+  className?: string
+}) {
+  return (
+    <a
+      href={href}
+      className={
+        "inline-flex items-center justify-center gap-2 rounded-md border border-[#30363d] " +
+        "bg-transparent px-5 py-3 text-sm font-semibold text-[#c9d1d9] transition-colors " +
+        "hover:bg-[#21262d] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#30363d] " +
+        className
+      }
+    >
+      <PlayCircle className="h-4 w-4" />
+      {label}
     </a>
   )
 }
@@ -116,12 +143,18 @@ function Hero() {
   return (
     <Section className="pt-16 md:pt-20">
       <div className="max-w-3xl">
+        <p className="mb-4 inline-flex items-center gap-2 rounded-full border border-[#30363d] bg-[#161b22] px-3 py-1 text-xs font-semibold uppercase tracking-wide text-[#58a6ff]">
+          <Workflow className="h-3.5 w-3.5" />
+          Orchestration Engine para AMRs industriais
+        </p>
         <h1 className="text-3xl font-bold leading-tight text-[#e6edf3] sm:text-4xl md:text-5xl">
           Orquestre AMRs com confirmação física e recuperação automática — sem parar a linha.
         </h1>
         <p className="mt-5 text-lg text-[#8b949e]">
-          {BRAND} é a camada de orquestração sobre seus robôs (SEER) para entrega de peças entre
-          estações com handshake de 2 etapas, telemetria ao vivo e controles de segurança.
+          {BRAND} é o control-plane que roda sobre os robôs que você já tem (SEER): dispara entregas
+          por botão físico, <span className="text-[#c9d1d9]">coordena múltiplos AMRs em paralelo numa
+          mesma missão</span> — um leva o rack cheio, outro busca o vazio — com handshake de 2 etapas
+          e recuperação automática de falhas.
         </p>
 
         <div className="mt-8 grid gap-3 sm:grid-cols-3">
@@ -139,15 +172,13 @@ function Hero() {
             </div>
           ))}
         </div>
+        <p className="mt-3 text-xs text-[#6e7681]">
+          Claims direcionais — expectativa a ser medida no piloto, não número fabricado.
+        </p>
 
         <div className="mt-8 flex flex-wrap items-center gap-4">
-          <CtaButton label="Solicitar piloto (20 min)" />
-          <a
-            href="#como-funciona"
-            className="inline-flex items-center gap-2 text-sm font-medium text-[#58a6ff] hover:underline"
-          >
-            Ver como funciona <ArrowRight className="h-4 w-4" />
-          </a>
+          <CtaButton label="Solicitar piloto" />
+          <SecondaryCta label="Ver o caso de uso" href="#caso-de-uso" />
         </div>
 
         <p className="mt-4 text-xs text-[#6e7681]">
@@ -265,33 +296,6 @@ function HowItWorks() {
         </ol>
       </Section>
     </div>
-  )
-}
-
-// ── Differentiators (also the "Segurança" anchor target) ─────────────────────
-function Differentiators() {
-  return (
-    <Section id="seguranca">
-      <SectionTitle
-        kicker="Diferenciais"
-        title="Projetado para fábrica: UX, segurança e integração."
-      />
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {[
-          { icon: Hand, text: "Handshake físico (2 botões) reduz despacho indevido" },
-          { icon: MapPin, text: "Operação robusta em mapa grande com assistência de relocalização" },
-          { icon: History, text: "Recuperação de falhas: fila, reenvio, alarmes, visibilidade" },
-          { icon: OctagonX, text: "Controle operacional: stop-all, jog manual, intervenção guiada" },
-          { icon: Radio, text: "Rastreabilidade: telemetria ao vivo + histórico" },
-          { icon: Workflow, text: "Não é robô, é camada de orquestração — entra por cima do que você já tem" },
-        ].map((d) => (
-          <div key={d.text} className="rounded-lg border border-[#30363d] bg-[#161b22] p-5">
-            <d.icon className="mb-3 h-5 w-5 text-[#58a6ff]" />
-            <p className="text-[#c9d1d9]">{d.text}</p>
-          </div>
-        ))}
-      </div>
-    </Section>
   )
 }
 
@@ -509,7 +513,7 @@ function Footer() {
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-2 px-5 py-10 text-sm text-[#8b949e] sm:px-8">
         <div className="flex items-center gap-2 font-medium text-[#c9d1d9]">
           <MonitorPlay className="h-4 w-4 text-[#58a6ff]" />
-          {BRAND} — Orquestração de AMRs para chão de fábrica
+          {BRAND} — {TAGLINE}
         </div>
         <div>Brasil</div>
         <a href={`mailto:${CONTACT_EMAIL}`} className="text-[#58a6ff] hover:underline">
@@ -521,6 +525,254 @@ function Footer() {
   )
 }
 
+// ── Honest social proof strip ────────────────────────────────────────────────
+function ProofStrip() {
+  return (
+    <div className="border-y border-[#30363d] bg-[#0b0f14]">
+      <div className="mx-auto flex w-full max-w-6xl flex-col items-center gap-2 px-5 py-6 text-center sm:px-8">
+        <p className="text-sm font-medium text-[#c9d1d9]">
+          Primeiro piloto em andamento — referências em breve.
+        </p>
+        <p className="text-xs text-[#6e7681]">
+          Sem logos emprestados. O piloto numa planta automotiva é a nossa máquina de prova.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+// ── Os 5 Pilares ─────────────────────────────────────────────────────────────
+const PILLAR_STATUS = {
+  live: { label: "Vivo", emoji: "✅", cls: "border-[#238636] bg-[#10301c] text-[#3fb950]" },
+  roadmap: { label: "Roadmap", emoji: "🟡", cls: "border-[#9e6a03] bg-[#2b2206] text-[#d29922]" },
+  vision: { label: "Norte (visão)", emoji: "🔭", cls: "border-[#1f6feb] bg-[#0c1d33] text-[#58a6ff]" },
+} as const
+
+const PILLARS: {
+  icon: React.ComponentType<{ className?: string }>
+  title: string
+  status: keyof typeof PILLAR_STATUS
+  body: string
+}[] = [
+  {
+    icon: Plug,
+    title: "1. Integração",
+    status: "live",
+    body: "Conexão com SEER (TCP), OPC UA (botões físicos) e mapas RoboShop. Agnóstico de hardware por design.",
+  },
+  {
+    icon: Hand,
+    title: "2. Sincronização",
+    status: "live",
+    body: "Handshake físico de 2 etapas: despacha só quando origem e destino confirmam. Estados sincronizados em tempo real.",
+  },
+  {
+    icon: Workflow,
+    title: "3. Orquestração — nosso núcleo",
+    status: "live",
+    body: "Despacho dual-AMR coordenado, fila, requeue automático, alarmes, stop-all por software e jog manual. É aqui que ganhamos.",
+  },
+  {
+    icon: LineChart,
+    title: "4. Otimização",
+    status: "roadmap",
+    body: "Roteamento e sequenciamento por dados de throughput/gargalo. Hoje coletamos o histórico (tempo por rota, taxa de falha) que alimenta isso.",
+  },
+  {
+    icon: Telescope,
+    title: "5. Simulação / Digital Twin",
+    status: "vision",
+    body: "Gêmeo digital do fluxo de materiais: simular layouts, dimensionar frota e validar mudanças antes de tocar a planta. Nosso norte de longo prazo.",
+  },
+]
+
+function StatusPill({ status }: { status: keyof typeof PILLAR_STATUS }) {
+  const s = PILLAR_STATUS[status]
+  return (
+    <span
+      className={
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold " +
+        s.cls
+      }
+    >
+      <span aria-hidden>{s.emoji}</span>
+      {s.label}
+    </span>
+  )
+}
+
+function Pillars() {
+  return (
+    <Section id="pilares">
+      <SectionTitle
+        kicker="Os 5 Pilares"
+        title="O mapa do software de execução robótica — e onde estamos hoje."
+        sub="Os 5 pilares descrevem o software completo de execução de uma frota. O FluxoFleet já é forte nos três de fundação. O resto está rotulado com honestidade: roadmap ou visão."
+      />
+      <div className="grid gap-4 md:grid-cols-2">
+        {PILLARS.map((p, i) => (
+          <div
+            key={p.title}
+            className={
+              "rounded-lg border border-[#30363d] bg-[#161b22] p-5 " +
+              (i === 4 ? "md:col-span-2" : "")
+            }
+          >
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <p.icon className="h-5 w-5 text-[#58a6ff]" />
+                <h3 className="font-semibold text-[#e6edf3]">{p.title}</h3>
+              </div>
+              <StatusPill status={p.status} />
+            </div>
+            <p className="text-sm text-[#8b949e]">{p.body}</p>
+          </div>
+        ))}
+      </div>
+      <div className="mt-6 flex flex-wrap gap-4 text-xs text-[#6e7681]">
+        <span>✅ Vivo = funciona no piloto hoje</span>
+        <span>🟡 Roadmap = base de dados já sendo coletada</span>
+        <span>🔭 Norte = visão de longo prazo</span>
+      </div>
+    </Section>
+  )
+}
+
+// ── Diferenciação ────────────────────────────────────────────────────────────
+function Differentiation() {
+  return (
+    <div id="diferenciacao" className="border-y border-[#30363d] bg-[#0b0f14]">
+      <Section>
+        <SectionTitle
+          kicker="Diferenciação"
+          title="Por que um control-plane independente — e não o de sempre."
+          sub="Agnóstico de hardware, Brasil-first, com handshake físico e orquestração dual-AMR."
+        />
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="rounded-xl border border-[#30363d] bg-[#161b22] p-6">
+            <div className="mb-4 flex items-center gap-3">
+              <Cpu className="h-5 w-5 text-[#58a6ff]" />
+              <h3 className="font-semibold text-[#e6edf3]">Por que não o software do fabricante</h3>
+            </div>
+            <BulletList
+              items={[
+                "Agnóstico de hardware: orquestramos a frota independente da marca — sem lock-in num único OEM.",
+                "Orquestração multi-robô real: o software do OEM gerencia os robôs dele; nós coordenamos uma missão entre vários robôs (dual-AMR) com handshake físico.",
+              ]}
+            />
+          </div>
+          <div className="rounded-xl border border-[#30363d] bg-[#161b22] p-6">
+            <div className="mb-4 flex items-center gap-3">
+              <Globe className="h-5 w-5 text-[#58a6ff]" />
+              <h3 className="font-semibold text-[#e6edf3]">Por que não um FMS estrangeiro</h3>
+            </div>
+            <BulletList
+              items={[
+                "Brasil-first: suporte, implantação e contrato na realidade local — fuso, idioma, faturamento em R$, presença no piloto.",
+                "Confiabilidade por handshake físico: confirmação de 2 botões reduz despacho indevido — pensado para o chão de fábrica, não só dashboard remoto.",
+                "Foco em execução, não só telemetria: orquestramos a tarefa de ponta a ponta, não apenas observamos.",
+              ]}
+            />
+          </div>
+        </div>
+      </Section>
+    </div>
+  )
+}
+
+// ── Caso de uso / piloto band ─────────────────────────────────────────────────
+function UseCase() {
+  return (
+    <Section id="caso-de-uso">
+      <div className="rounded-2xl border border-[#30363d] bg-gradient-to-b from-[#161b22] to-[#0d1117] p-6 md:p-10">
+        <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-[#58a6ff]">
+          <Factory className="h-4 w-4" />
+          Em piloto numa planta automotiva
+        </div>
+        <h2 className="mt-3 max-w-3xl text-2xl font-semibold leading-tight text-[#e6edf3] md:text-3xl">
+          Entrega da sub-montagem do conversor de torque, coordenada robô a robô.
+        </h2>
+        <p className="mt-4 max-w-3xl text-[#8b949e]">
+          O caso real que está rodando hoje: 3 part numbers saindo de um pickup único
+          (BTLOG1) para 3 pontos-de-uso distintos (FLBT10TC1/2/3). Nada despacha sem o destino
+          confirmar por botão físico; quando algo falha, a recuperação é automática.
+        </p>
+        <div className="mt-8 grid gap-4 sm:grid-cols-3">
+          {[
+            { icon: PackageCheck, title: "3 part numbers", body: "Sub-montagem do conversor de torque." },
+            { icon: MapPin, title: "Pickup único → 3 pontos-de-uso", body: "BTLOG1 para FLBT10TC1/2/3." },
+            { icon: Workflow, title: "Despacho dual-AMR", body: "Um leva o rack cheio, outro busca o vazio em paralelo." },
+          ].map((c) => (
+            <div key={c.title} className="rounded-lg border border-[#30363d] bg-[#0d1117] p-5">
+              <c.icon className="mb-3 h-5 w-5 text-[#58a6ff]" />
+              <h3 className="font-semibold text-[#e6edf3]">{c.title}</h3>
+              <p className="mt-1 text-sm text-[#8b949e]">{c.body}</p>
+            </div>
+          ))}
+        </div>
+        <p className="mt-6 max-w-3xl text-sm text-[#6e7681]">
+          Estamos medindo tempo por rota, taxa de falha e gargalos no piloto atual — os números reais
+          virão do cliente real. Sem métricas fabricadas.
+        </p>
+        <div className="mt-8 flex flex-wrap items-center gap-4">
+          <CtaButton label="Solicitar piloto" />
+          <SecondaryCta label="Ver o caso de uso" href="#caso-de-uso" />
+        </div>
+      </div>
+    </Section>
+  )
+}
+
+// ── Para quem (personas) ─────────────────────────────────────────────────────
+const PERSONAS = [
+  {
+    icon: Factory,
+    role: "Gestor de planta",
+    pain: "Parada de linha = dinheiro perdido.",
+    message: "Menos paradas por falha de entrega. O FluxoFleet recupera sozinho e mantém a linha andando.",
+  },
+  {
+    icon: LineChart,
+    role: "Engenheiro de processo / industrial",
+    pain: "Precisa de previsibilidade e dados para melhorar o fluxo.",
+    message: "Cada entrega vira dado: tempo por rota, gargalo por estação e turno. Decida com histórico, não com achismo.",
+  },
+  {
+    icon: Wrench,
+    role: "Líder de manutenção / operação",
+    pain: "Falhas viram improviso manual.",
+    message: "Fila, reenvio automático, alarmes e stop-all. Quando algo falha, você tem controle e visibilidade — não pânico.",
+  },
+  {
+    icon: Wallet,
+    role: "Comprador econômico",
+    pain: "Risco de lock-in e ROI incerto.",
+    message: "Roda sobre os robôs que você já tem — sem trocar frota. Setup previsível + assinatura por robô. Comece com um piloto.",
+  },
+]
+
+function Personas() {
+  return (
+    <div className="border-y border-[#30363d] bg-[#0b0f14]">
+      <Section>
+        <SectionTitle kicker="Para quem" title="Quem ganha com o FluxoFleet — e o que ouve da gente." />
+        <div className="grid gap-4 md:grid-cols-2">
+          {PERSONAS.map((p) => (
+            <div key={p.role} className="rounded-lg border border-[#30363d] bg-[#161b22] p-5">
+              <div className="mb-2 flex items-center gap-3">
+                <p.icon className="h-5 w-5 text-[#58a6ff]" />
+                <h3 className="font-semibold text-[#e6edf3]">{p.role}</h3>
+              </div>
+              <p className="text-sm text-[#6e7681]">Dor: {p.pain}</p>
+              <p className="mt-2 text-[#c9d1d9]">“{p.message}”</p>
+            </div>
+          ))}
+        </div>
+      </Section>
+    </div>
+  )
+}
+
 // ── Page ─────────────────────────────────────────────────────────────────────
 export function LandingPage() {
   return (
@@ -528,10 +780,14 @@ export function LandingPage() {
       <Header />
       <main>
         <Hero />
+        <ProofStrip />
         <Problem />
         <Solution />
+        <Pillars />
         <HowItWorks />
-        <Differentiators />
+        <Differentiation />
+        <UseCase />
+        <Personas />
         <Integrations />
         <Product />
         <Pilot />
