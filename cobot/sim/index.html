@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Fairino FR5 — Simulação 3D</title>
+<style>
+  :root { --bg:#0e1116; --panel:#161b22; --line:#2b3340; --accent:#3fb950; --text:#c9d1d9; --muted:#8b949e; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--text);
+    font-family:"Segoe UI",system-ui,Arial,sans-serif; overflow:hidden; }
+  #app { display:flex; height:100vh; }
+  #view { flex:1; position:relative; min-width:0; overflow:hidden; }
+  #view canvas { display:block; width:100% !important; height:100% !important; }
+  #panel { width:320px; flex:none; background:var(--panel); border-left:1px solid var(--line);
+    padding:16px; overflow-y:auto; }
+  h1 { font-size:15px; margin:0 0 2px; letter-spacing:.3px; }
+  .sub { color:var(--muted); font-size:12px; margin-bottom:16px; }
+  .sub2 { color:#9fb0c6; font-size:11px; margin:-10px 0 12px; }
+  .joint { margin-bottom:14px; }
+  .joint .row { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:4px; }
+  .joint label { font-size:13px; font-weight:600; }
+  .joint .val { font-variant-numeric:tabular-nums; color:var(--accent); font-size:13px; }
+  input[type=range] { width:100%; accent-color:var(--accent); }
+  .lim { display:flex; justify-content:space-between; color:var(--muted); font-size:10px; margin-top:2px; }
+  .btns { display:flex; gap:8px; margin:8px 0 14px; }
+  button { flex:1; background:#21262d; color:var(--text); border:1px solid var(--line);
+    border-radius:6px; padding:8px; font-size:12px; cursor:pointer; }
+  button:hover { border-color:var(--accent); color:#fff; }
+  button.on { background:var(--accent); color:#06210d; border-color:var(--accent); font-weight:600; }
+  button.danger { background:#3d2b16; color:#ffb454; border-color:#7a5a2e; font-weight:600; }
+  button.danger:hover { background:#ffb454; color:#211405; border-color:#ffb454; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  .moving-banner { display:none; align-items:center; gap:8px; background:#3d2b16; color:#ffb454;
+    border:1px solid #7a5a2e; border-radius:6px; padding:8px 10px; font-size:12px; font-weight:600;
+    margin:0 0 14px; }
+  .moving-banner.show { display:flex; }
+  .moving-banner .pulse { width:10px; height:10px; border-radius:50%; background:#ffb454;
+    animation:pulse 0.8s ease-in-out infinite; flex:none; }
+  @keyframes pulse { 0%,100%{ opacity:1; transform:scale(1);} 50%{ opacity:.3; transform:scale(.6);} }
+  .status { display:flex; align-items:center; gap:8px; font-size:12px; margin:6px 0 14px; color:var(--muted); }
+  .aimbox { font-size:12px; color:var(--muted); margin:-8px 0 14px; padding:7px 10px;
+    background:#10261a; border:1px solid #234a31; border-radius:6px; }
+  .aimbox b { color:var(--accent); font-variant-numeric:tabular-nums; }
+  .aimbox.warn b { color:#ffb454; }
+  .dot { width:9px; height:9px; border-radius:50%; background:#6e7681; flex:none; }
+  .dot.live { background:var(--accent); box-shadow:0 0 8px var(--accent); }
+  .dot.err { background:#f85149; }
+  .cam { margin:6px 0 14px; border:1px solid var(--line); border-radius:6px; overflow:hidden; background:#000; }
+  .cam img { width:100%; display:block; }
+  .cam .cap { font-size:11px; color:var(--muted); padding:5px 8px; background:var(--panel); border-top:1px solid var(--line); }
+  .tcp { font-size:12px; color:var(--muted); border-top:1px solid var(--line); padding-top:12px; }
+  .tcp b { color:var(--text); font-variant-numeric:tabular-nums; }
+  #loading { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    background:var(--bg); color:var(--muted); font-size:14px; z-index:10; }
+  #err { color:#f85149; font-size:12px; white-space:pre-wrap; }
+  .hint { position:absolute; left:12px; bottom:10px; color:var(--muted); font-size:11px; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+    "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+    "urdf-loader": "https://cdn.jsdelivr.net/npm/urdf-loader@0.12.6/src/URDFLoader.js"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app">
+  <div id="view">
+    <div id="loading">Carregando modelo do FR5…</div>
+    <div class="hint">Arraste para girar · scroll para zoom · botão direito para mover</div>
+  </div>
+  <div id="panel">
+    <h1>Fairino FR5</h1>
+    <div class="sub">Simulação 3D — gêmeo virtual · órbita de inspeção (cartesiano + IK) · <span style="color:#3fb950">v8-ik</span></div>
+    <div class="sub2" id="orbit-info">Órbita IK: carregando…</div>
+
+    <div class="btns">
+      <button id="btn-live">● Ao vivo (robô)</button>
+    </div>
+    <div class="btns">
+      <button id="btn-move" class="danger">▶ Mover robô (demo)</button>
+      <button id="btn-wave" class="danger">👋 Tchau</button>
+    </div>
+    <div class="status"><span class="dot" id="dot"></span><span id="stat">Modo manual — sem conexão</span></div>
+    <div class="aimbox" id="aimbox">Apontamento: <b id="aimval">—</b></div>
+    <div class="moving-banner" id="movebanner"><span class="pulse"></span><span id="movemsg">Robô em movimento…</span></div>
+
+    <div class="cam" id="cambox" style="display:none">
+      <img id="cam" alt="câmera eye-in-hand" />
+      <div class="cap">Câmera eye-in-hand (ponta do robô)</div>
+    </div>
+
+    <div id="joints"></div>
+    <div class="btns">
+      <button id="btn-home">Home</button>
+      <button id="btn-zero">Zerar</button>
+    </div>
+    <div class="tcp" id="tcp">TCP: —</div>
+    <div id="err"></div>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { ColladaLoader } from 'three/addons/loaders/ColladaLoader.js';
+import URDFLoader from 'urdf-loader';
+
+const JOINTS = ['j1','j2','j3','j4','j5','j6'];
+// Pose "Home" igual ao move_robot.py: [0, -20, -90, -70, 90, 0] graus
+const HOME = { j1:0, j2:-20, j3:-90, j4:-70, j5:90, j6:0 };
+
+const viewEl = document.getElementById('view');
+const errEl = document.getElementById('err');
+
+// ---- three.js base ----
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0e1116);
+
+const camera = new THREE.PerspectiveCamera(50, 1, 0.01, 100);
+camera.position.set(1.2, 1.0, 1.2);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+viewEl.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x35404d, 1.1));
+const key = new THREE.DirectionalLight(0xffffff, 1.4);
+key.position.set(2, 3, 2);
+scene.add(key);
+const fill = new THREE.DirectionalLight(0xffffff, 0.5);
+fill.position.set(-2, 1.5, -1.5);
+scene.add(fill);
+
+const grid = new THREE.GridHelper(4, 40, 0x2b3340, 0x1a2029);
+scene.add(grid);
+scene.add(new THREE.AxesHelper(0.25));
+
+// ---- peça mock + caminho da órbita (vindos do plano IK do backend) ----
+// Conversão frame BASE do robô (Z-up) -> three.js (Y-up):
+//   three (x, y, z) = (X_base, Z_base, -Y_base)
+function baseToThree(x, y, z){ return new THREE.Vector3(x, z, -y); }
+
+// Centro C default (coerente com o backend); atualizado ao buscar /api/orbit-plan.
+let partCenterBase = [0.40, 0.40, 0.18];
+const partCenter = baseToThree(...partCenterBase);
+controls.target.copy(partCenter);
+
+let partGroup = null;
+function addMockPart(){
+  if(partGroup) scene.remove(partGroup);
+  partGroup = new THREE.Group();
+  partGroup.position.copy(partCenter);
+
+  const capGeom = new THREE.SphereGeometry(0.055, 24, 16);
+  const capMat = new THREE.MeshStandardMaterial({ color:0x9ec5ff, roughness:0.35, metalness:0.2 });
+  const cap = new THREE.Mesh(capGeom, capMat);
+  cap.castShadow = true;
+  partGroup.add(cap);
+
+  const pinGeom = new THREE.CylinderGeometry(0.01, 0.01, 0.10, 14);
+  const pinMat = new THREE.MeshStandardMaterial({ color:0xc5d4ff, roughness:0.4, metalness:0.25 });
+  const pin = new THREE.Mesh(pinGeom, pinMat);
+  pin.position.set(0, -0.06, 0);
+  partGroup.add(pin);
+
+  // marcador do centro C (alvo do look-at)
+  const dotGeom = new THREE.SphereGeometry(0.012, 12, 8);
+  const dotMat = new THREE.MeshBasicMaterial({ color:0xffcf70 });
+  partGroup.add(new THREE.Mesh(dotGeom, dotMat));
+
+  scene.add(partGroup);
+}
+
+// Caminho REAL da ponta: calculado por FK do URDF nas poses resolvidas (IK).
+let orbitPathLine = null;
+let keypointDots = null;
+function buildOrbitPath(poses){
+  if(!robot || !robot.links['wrist3_Link'] || !poses || !poses.length) return;
+  // salva pose atual para restaurar depois
+  const saved = {}; JOINTS.forEach(j => saved[j] = robot.joints[j] ? robot.joints[j].angle : 0);
+
+  const pts = [];
+  poses.forEach(pose => {
+    JOINTS.forEach((j,i) => { if(robot.joints[j]) robot.joints[j].setJointValue(deg2rad(pose[i])); });
+    robot.updateMatrixWorld(true);
+    const p = new THREE.Vector3();
+    robot.links['wrist3_Link'].getWorldPosition(p);
+    pts.push(p.clone());
+  });
+  pts.push(pts[0].clone()); // fecha o loop
+
+  // restaura
+  JOINTS.forEach(j => { if(robot.joints[j]) robot.joints[j].setJointValue(saved[j]); });
+  robot.updateMatrixWorld(true);
+
+  if(orbitPathLine){ scene.remove(orbitPathLine); orbitPathLine.geometry.dispose(); }
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  const mat = new THREE.LineBasicMaterial({ color:0x3fb950, transparent:true, opacity:0.85 });
+  orbitPathLine = new THREE.Line(geo, mat);
+  scene.add(orbitPathLine);
+
+  if(keypointDots){ scene.remove(keypointDots); }
+  const dotGeo = new THREE.BufferGeometry().setFromPoints(pts.slice(0, -1));
+  const dotMat = new THREE.PointsMaterial({ color:0x9ec5ff, size:0.012, sizeAttenuation:true });
+  keypointDots = new THREE.Points(dotGeo, dotMat);
+  scene.add(keypointDots);
+}
+
+let orbitPlanLoaded = false;
+async function loadOrbitPlan(){
+  if(orbitPlanLoaded) return;
+  try {
+    const r = await fetch('./api/orbit-plan', { cache:'no-store' });
+    if(!r.ok) return;
+    const plan = await r.json();
+    if(plan.center && plan.center.length === 3){
+      partCenterBase = plan.center;
+      partCenter.copy(baseToThree(...partCenterBase));
+      controls.target.copy(partCenter);
+      addMockPart();
+    }
+    if(plan.poses && plan.poses.length){
+      buildOrbitPath(plan.poses);
+      orbitPlanLoaded = true;
+      const m = plan.metrics || {};
+      const info = document.getElementById('orbit-info');
+      if(info && m.n){
+        info.textContent = `Órbita IK: ${m.n} pts · ${(m.frac_within_3deg*100).toFixed(0)}% ≤3° · ` +
+          `erro pos ${m.mean_pos_err_mm.toFixed(1)} mm · C=(${partCenterBase.map(v=>v.toFixed(2)).join(', ')})`;
+      }
+    }
+  } catch(e){ /* ponte ainda subindo */ }
+}
+
+addMockPart();
+
+// ---- carregar URDF ----
+let robot = null;
+const manager = new THREE.LoadingManager();
+
+const loader = new URDFLoader(manager);
+// URDF do FR5 vem em Z-up (padrão ROS). Mantemos o robô em pé.
+loader.loadMeshCb = (path, mgr, done) => {
+  new ColladaLoader(mgr).load(
+    path,
+    (res) => done(res.scene),
+    undefined,
+    (e) => { console.error('mesh fail', path, e); done(null, e); }
+  );
+};
+
+fetch('./fr5.urdf')
+  .then(r => { if(!r.ok) throw new Error('HTTP '+r.status+' ao ler fr5.urdf'); return r.text(); })
+  .then(text => {
+    // resolve package:// -> caminho relativo a este diretório
+    const clean = text.replaceAll('package://frcobot_description/', '');
+    loader.workingPath = '';
+    robot = loader.parse(clean);
+    robot.rotation.x = -Math.PI / 2;   // Z-up (ROS) -> Y-up (three.js)
+    scene.add(robot);
+    manager.onLoad = () => {
+      document.getElementById('loading').remove();
+      applyJoints();
+      loadOrbitPlan();
+      // a ponte pode subir o plano logo depois; tenta de novo ate carregar
+      const retry = setInterval(() => {
+        if(orbitPlanLoaded){ clearInterval(retry); return; }
+        loadOrbitPlan();
+      }, 1000);
+    };
+  })
+  .catch(err => {
+    document.getElementById('loading').textContent = 'Erro ao carregar.';
+    errEl.textContent = String(err) +
+      '\n\nVocê está abrindo via servidor HTTP? Rode  start.bat  (não abra o arquivo direto).';
+    console.error(err);
+  });
+
+// ---- painel de juntas ----
+const deg2rad = d => d * Math.PI / 180;
+const state = { ...HOME };
+const jointsEl = document.getElementById('joints');
+const sliders = {};
+
+function buildPanel(){
+  const limits = {
+    j1:[-175,175], j2:[-265,85], j3:[-160,160],
+    j4:[-265,85], j5:[-175,175], j6:[-175,175]
+  };
+  JOINTS.forEach(j => {
+    const [lo,hi] = limits[j];
+    const wrap = document.createElement('div');
+    wrap.className = 'joint';
+    wrap.innerHTML =
+      `<div class="row"><label>${j.toUpperCase()}</label><span class="val" id="v-${j}">0°</span></div>
+       <input type="range" id="s-${j}" min="${lo}" max="${hi}" step="0.5" value="${state[j]}">
+       <div class="lim"><span>${lo}°</span><span>${hi}°</span></div>`;
+    jointsEl.appendChild(wrap);
+    const s = wrap.querySelector(`#s-${j}`);
+    sliders[j] = s;
+    s.addEventListener('input', () => { state[j] = parseFloat(s.value); applyJoints(); });
+  });
+}
+
+function applyJoints(){
+  if(!robot) return;
+  JOINTS.forEach(j => {
+    if(robot.joints[j]) robot.joints[j].setJointValue(deg2rad(state[j]));
+    const v = document.getElementById('v-'+j);
+    if(v) v.textContent = state[j].toFixed(1)+'°';
+    if(sliders[j]) sliders[j].value = state[j];
+  });
+  updateTCP();
+}
+
+function updateTCP(){
+  if(!robot || !robot.links['wrist3_Link']) return;
+  robot.updateMatrixWorld(true);
+  const p = new THREE.Vector3();
+  robot.links['wrist3_Link'].getWorldPosition(p);
+  document.getElementById('tcp').innerHTML =
+    `TCP (flange): &nbsp; X <b>${p.x.toFixed(3)}</b> &nbsp; Y <b>${(-p.z).toFixed(3)}</b> &nbsp; Z <b>${p.y.toFixed(3)}</b> &nbsp;m`;
+  updateAim(p);
+}
+
+// Erro de apontamento (graus): angulo entre o eixo de aproximacao da flange
+// (+Z local de wrist3_Link) e o vetor ponta->centro da peca.
+const _approachLocalZ = new THREE.Vector3(0, 0, 1);
+function updateAim(tipWorld){
+  const box = document.getElementById('aimbox');
+  const val = document.getElementById('aimval');
+  if(!box || !val || !robot.links['wrist3_Link']) return;
+  const q = new THREE.Quaternion();
+  robot.links['wrist3_Link'].getWorldQuaternion(q);
+  const approach = _approachLocalZ.clone().applyQuaternion(q).normalize();
+  const toCenter = partCenter.clone().sub(tipWorld).normalize();
+  const dot = Math.max(-1, Math.min(1, approach.dot(toCenter)));
+  const ang = Math.acos(dot) * 180 / Math.PI;
+  val.textContent = ang.toFixed(2) + '\u00b0';
+  box.classList.toggle('warn', ang > 3.0);
+}
+
+document.getElementById('btn-home').onclick = () => { if(live) return; Object.assign(state, HOME); applyJoints(); };
+document.getElementById('btn-zero').onclick = () => { if(live) return; JOINTS.forEach(j=>state[j]=0); applyJoints(); };
+
+buildPanel();
+
+// ---- modo ao vivo: espelha o robô real via /api/joints ----
+let live = false;
+let pollTimer = null;
+const dot = document.getElementById('dot');
+const statEl = document.getElementById('stat');
+const liveBtn = document.getElementById('btn-live');
+const camBox = document.getElementById('cambox');
+const camImg = document.getElementById('cam');
+const moveBtn = document.getElementById('btn-move');
+const waveBtn = document.getElementById('btn-wave');
+const moveBanner = document.getElementById('movebanner');
+const moveMsg = document.getElementById('movemsg');
+
+function setSlidersDisabled(d){
+  JOINTS.forEach(j => { if(sliders[j]) sliders[j].disabled = d; });
+}
+
+async function poll(){
+  try {
+    const r = await fetch('./api/joints', { cache:'no-store' });
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const d = await r.json();
+    if(d.joints && d.joints.length === 6){
+      JOINTS.forEach((j,i) => state[j] = d.joints[i]);
+      applyJoints();
+    }
+    if(d.ok){
+      dot.className = 'dot live';
+      const fonte = d.source === 'simulate' ? 'simulado' : 'robô';
+      statEl.textContent = `Ao vivo (${fonte}) · ${d.age_ms ?? 0} ms`;
+    } else {
+      dot.className = 'dot err';
+      statEl.textContent = d.error || 'aguardando robô…';
+    }
+    if(d.camera && camBox.style.display === 'none'){
+      camImg.src = './api/camera.mjpg';
+      camBox.style.display = '';
+    }
+    // indicador de movimento do robô real
+    if(d.moving){
+      moveBanner.classList.add('show');
+      moveMsg.textContent = 'Robô em movimento… ' + (d.move_msg || '');
+      moveBtn.disabled = true; waveBtn.disabled = true;
+    } else {
+      moveBanner.classList.remove('show');
+      moveBtn.disabled = false; waveBtn.disabled = false;
+    }
+  } catch(e){
+    dot.className = 'dot err';
+    statEl.textContent = 'Ponte offline — rode  bridge.py';
+  }
+}
+
+function setLive(on){
+  live = on;
+  liveBtn.classList.toggle('on', on);
+  liveBtn.textContent = on ? '■ Parar (manual)' : '● Ao vivo (robô)';
+  setSlidersDisabled(on);
+  if(on){
+    poll();
+    pollTimer = setInterval(poll, 33);   // ~30 Hz para visual mais fluido
+  } else {
+    clearInterval(pollTimer); pollTimer = null;
+    dot.className = 'dot';
+    statEl.textContent = 'Modo manual — sem conexão';
+    camBox.style.display = 'none';
+    camImg.src = '';
+  }
+}
+
+liveBtn.onclick = () => setLive(!live);
+
+// Inicia automaticamente no modo ao vivo para mostrar a orbita sem acao manual.
+setTimeout(() => setLive(true), 120);
+
+// ---- botões: mover o robô REAL ----
+async function startMove(url, confirmMsg){
+  if(!confirm(confirmMsg)) return;
+  if(!live) setLive(true);            // liga o ao vivo p/ ver o 3D acompanhar
+  moveBtn.disabled = true; waveBtn.disabled = true;
+  moveBanner.classList.add('show');
+  moveMsg.textContent = 'Iniciando movimento…';
+  try {
+    const r = await fetch(url, { method:'POST' });
+    const d = await r.json();
+    if(!d.ok || d.started === false){
+      moveMsg.textContent = d.msg || 'não foi possível mover';
+      if(!d.started){
+        setTimeout(() => moveBanner.classList.remove('show'), 2500);
+        moveBtn.disabled = false; waveBtn.disabled = false;
+      }
+    }
+  } catch(e){
+    moveMsg.textContent = 'erro: ponte offline';
+    moveBtn.disabled = false; waveBtn.disabled = false;
+    setTimeout(() => moveBanner.classList.remove('show'), 2500);
+  }
+}
+
+moveBtn.onclick = () => startMove('./api/move',
+  '⚠ ATENÇÃO: isto vai MOVER O ROBÔ REAL.\n\n' +
+  'O braço vai balançar a base e girar o punho, depois voltar à posição inicial.\n' +
+  'Garanta que a área ao redor do robô está LIVRE.\n\nContinuar?');
+
+waveBtn.onclick = () => startMove('./api/wave',
+  '👋 Isto vai MOVER O ROBÔ REAL para dar um tchau.\n\n' +
+  'Ele levanta a "mão" e balança o punho de um lado pro outro, depois volta.\n' +
+  'Garanta que a área ao redor do robô está LIVRE.\n\nContinuar?');
+
+// ---- loop / resize ----
+function resize(){
+  const w = viewEl.clientWidth, h = viewEl.clientHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w/h; camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+
+(function animate(){
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+})();
+</script>
+</body>
+</html>

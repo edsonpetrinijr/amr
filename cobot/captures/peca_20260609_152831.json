@@ -1,0 +1,25 @@
+{
+  "brilho_medio": 59.924869791666666,
+  "nitidez": 91.392578125,
+  "resolucao": [
+    1280,
+    720
+  ],
+  "marcador_centro_px": [
+    639.5,
+    359.5
+  ],
+  "marcador_tamanho_px": 159.0,
+  "marcador_angulo_deg": 0.0,
+  "marcador_offset_centro_px": 0.7071067811865476,
+  "veredito": "OK",
+  "pose_robo_graus": [
+    0.0,
+    -20.0,
+    -90.0,
+    -70.0,
+    90.0,
+    20.0
+  ],
+  "imagem": "captures\\peca_20260609_152831.png"
+}

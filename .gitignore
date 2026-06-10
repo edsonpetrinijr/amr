@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Build / distribution output
+dist/
+build/
+out/
+release/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+
+# Generated data / logs (large feed_watcher & ERP dumps)
+amr/a/
+amr/scripts/feed_watcher/snapshots/
+amr/scripts/feed_watcher/latest_copy.txt
+amr/server/erp_feed_copy.txt
+amr/TRANVR.TXT
+amr/TRANVR2.TXT
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
