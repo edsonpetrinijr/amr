@@ -1,0 +1,11 @@
+# dependencias adicionais para a POC de reconstrucao 3D
+# (alem das que ja estao em requirements.txt)
+
+# opencv-contrib tem aruco/calib3d completo.
+opencv-contrib-python>=4.8
+numpy>=1.24
+
+# COLMAP NAO e' pip -- instalar binario:
+#   Windows: https://github.com/colmap/colmap/releases
+#   Linux:   apt install colmap (versao recente tem suporte CUDA)
+# Adicionar ao PATH e reiniciar o shell.

@@ -1,0 +1,5 @@
+# pasta de saida dos runs de reconstrucao -- nao commitar.
+outputs/
+calib/intrinsics.json
+calib/hand_eye.json
+*.ply
