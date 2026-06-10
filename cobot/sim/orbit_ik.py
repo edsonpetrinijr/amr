@@ -47,6 +47,7 @@ class JointDef:
     lower: float             # limite inferior (rad)
     upper: float             # limite superior (rad)
     R0: np.ndarray = field(default=None)  # rotacao fixa do origin (cache)
+    is_z: bool = False       # True se axis == +Z (rotacao = Rz trivial, rapida)
 
 
 def _rpy_to_matrix(roll: float, pitch: float, yaw: float) -> np.ndarray:
@@ -73,6 +74,25 @@ def _axis_angle_matrix(axis: np.ndarray, theta: float) -> np.ndarray:
     ])
 
 
+def _rotate_about_axis(R: np.ndarray, jd: "JointDef", theta: float) -> np.ndarray:
+    """Retorna R @ Rot(jd.axis, theta).
+
+    Caminho rapido para eixo +Z (caso do FR5: todos os joints giram em Z): a
+    rotacao so mistura as colunas 0 e 1 de R, evitando montar a matriz de
+    Rodrigues e o matmul 3x3 a cada junta/iteracao. Cai no caso geral se o
+    eixo nao for +Z.
+    """
+    if jd.is_z:
+        c, s = math.cos(theta), math.sin(theta)
+        c0 = R[:, 0]
+        c1 = R[:, 1]
+        out = R.copy()
+        out[:, 0] = c0 * c + c1 * s
+        out[:, 1] = -c0 * s + c1 * c
+        return out
+    return R @ _axis_angle_matrix(jd.axis, theta)
+
+
 def parse_urdf_chain(urdf_path: str = URDF_PATH) -> List[JointDef]:
     """Le origins (xyz/rpy), axis e limits dos joints j1..j6 do URDF."""
     tree = ET.parse(urdf_path)
@@ -93,6 +113,8 @@ def parse_urdf_chain(urdf_path: str = URDF_PATH) -> List[JointDef]:
         jd = JointDef(name=name, xyz=xyz, rpy=rpy, axis=axis,
                       lower=lower, upper=upper)
         jd.R0 = _rpy_to_matrix(*rpy)
+        jd.is_z = bool(abs(axis[0]) < 1e-9 and abs(axis[1]) < 1e-9
+                       and axis[2] > 0.0)
         by_name[name] = jd
     return [by_name[n] for n in CHAIN_JOINTS]
 
@@ -108,7 +130,7 @@ def fk(chain: List[JointDef], q: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         # T_i = Origin(xyz, rpy) * Rot(axis, q_i)
         p = p + R @ jd.xyz
         R = R @ jd.R0
-        R = R @ _axis_angle_matrix(jd.axis, q[i])
+        R = _rotate_about_axis(R, jd, q[i])
     return p, R
 
 
@@ -117,6 +139,29 @@ def tip_pose(chain: List[JointDef], q: np.ndarray) -> Tuple[np.ndarray, np.ndarr
     p, R = fk(chain, q)
     approach = R @ TOOL_APPROACH_LOCAL
     return p, approach / (np.linalg.norm(approach) + 1e-12)
+
+
+def fk_axes(chain: List[JointDef], q: np.ndarray):
+    """FK + dados para o Jacobiano analitico, numa unica passada.
+
+    Retorna (p_tip, R_tip, axes) onde axes[i] = (z_i, o_i):
+      z_i = eixo de rotacao da junta i no frame MUNDO (unit)
+      o_i = posicao do ponto por onde passa o eixo da junta i (mundo)
+    Com isso o Jacobiano de posicao e' z_i x (p_tip - o_i) e o de orientacao
+    sai de da/dq_i = z_i x a -- tudo a partir de UMA FK, em vez de 7 FK por
+    diferencas finitas.
+    """
+    R = np.eye(3)
+    p = np.zeros(3)
+    axes = []
+    for i, jd in enumerate(chain):
+        p = p + R @ jd.xyz
+        R = R @ jd.R0
+        # frame/posicao da junta i ANTES de aplicar sua propria rotacao
+        z = R @ jd.axis
+        axes.append((z, p.copy()))
+        R = _rotate_about_axis(R, jd, q[i])
+    return p, R, axes
 
 
 # --------------------------------------------------------------------------- #
@@ -170,41 +215,81 @@ def _orientation_error(a, d_target):
 
     Usa axis-angle (nao apenas o produto vetorial) para nao perder magnitude
     perto de 180 graus, onde cross(a,d) -> 0 (singularidade que prende o IK).
+    Cross/norm escritos a mao (3 floats) -> bem mais barato que np.cross em loop.
     """
-    cos_ang = float(np.clip(np.dot(a, d_target), -1.0, 1.0))
+    a0, a1, a2 = a[0], a[1], a[2]
+    d0, d1, d2 = d_target[0], d_target[1], d_target[2]
+    cos_ang = a0 * d0 + a1 * d1 + a2 * d2
+    if cos_ang > 1.0:
+        cos_ang = 1.0
+    elif cos_ang < -1.0:
+        cos_ang = -1.0
+    ax = a1 * d2 - a2 * d1
+    ay = a2 * d0 - a0 * d2
+    az = a0 * d1 - a1 * d0
+    n = math.sqrt(ax * ax + ay * ay + az * az)
     ang = math.acos(cos_ang)
-    axis = np.cross(a, d_target)
-    n = np.linalg.norm(axis)
     if n < 1e-9:
         if cos_ang > 0.0:
             return np.zeros(3)            # ja alinhado
         # quase antiparalelo: escolhe um eixo perpendicular qualquer
         perp = np.array([1.0, 0.0, 0.0])
-        if abs(a[0]) > 0.9:
+        if abs(a0) > 0.9:
             perp = np.array([0.0, 1.0, 0.0])
         axis = np.cross(a, perp)
         axis /= (np.linalg.norm(axis) + 1e-12)
         return axis * ang
-    return (axis / n) * ang
+    s = ang / n
+    return np.array([ax * s, ay * s, az * s])
 
 
-def _residual(chain, q, P_target, d_target):
-    """Erro de 6 componentes: [pos(3), apontamento(3)]."""
-    p, a = tip_pose(chain, q)
+def _analytic_jacobian(chain, q, P_target, d_target, eps=1e-6):
+    """Jacobiano 6x6 do residuo [pos(3), apontamento(3)] em UMA passada de FK.
+
+    Equivalente em 1a ordem ao Jacobiano por diferencas finitas (que custava 7
+    FK por iteracao), mas ~7x mais barato:
+      - posicao: linha i = z_i x (p_tip - o_i)            (geometrico, exato)
+      - apontamento: d(e_rot)/dq = (de_rot/da) @ (da/dq), com da/dq_i = z_i x a
+        e de_rot/da (3x3) por diferencas finitas BARATAS sobre o vetor 'a'
+        (sem FK, so reavalia a funcao de erro de apontamento).
+    Retorna (J, e, pos_err, point_err_rad). Os erros saem de graca de 'e'.
+    """
+    p, R, axes = fk_axes(chain, q)
+    a = R @ TOOL_APPROACH_LOCAL
+    a = a / (np.linalg.norm(a) + 1e-12)
+
     e_pos = p - P_target
     e_rot = _orientation_error(a, d_target)
-    return np.concatenate([e_pos, e_rot])
+    e = np.concatenate([e_pos, e_rot])
 
-
-def _numeric_jacobian(chain, q, P_target, d_target, eps=1e-6):
     J = np.zeros((6, 6))
-    e0 = _residual(chain, q, P_target, d_target)
-    for i in range(6):
-        dq = q.copy()
-        dq[i] += eps
-        ei = _residual(chain, dq, P_target, d_target)
-        J[:, i] = (ei - e0) / eps
-    return J, e0
+    dadq = np.zeros((3, 6))
+    ax, ay, az = a[0], a[1], a[2]
+    px, py, pz = p[0], p[1], p[2]
+    for i, (z, o) in enumerate(axes):
+        z0, z1, z2 = z[0], z[1], z[2]
+        rx, ry, rz = px - o[0], py - o[1], pz - o[2]
+        # linhas de posicao: z x (p - o)
+        J[0, i] = z1 * rz - z2 * ry
+        J[1, i] = z2 * rx - z0 * rz
+        J[2, i] = z0 * ry - z1 * rx
+        # da/dq_i = z x a (tangente a esfera unitaria)
+        dadq[0, i] = z1 * az - z2 * ay
+        dadq[1, i] = z2 * ax - z0 * az
+        dadq[2, i] = z0 * ay - z1 * ax
+
+    # de_rot/da (3x3) por diferencas finitas no proprio 'a' (sem FK).
+    M = np.zeros((3, 3))
+    for k in range(3):
+        ap = a.copy()
+        ap[k] += eps
+        ap /= np.linalg.norm(ap)
+        M[:, k] = (_orientation_error(ap, d_target) - e_rot) / eps
+    J[3:6, :] = M @ dadq
+
+    pos_err = float(math.sqrt(e_pos[0] * e_pos[0] + e_pos[1] * e_pos[1] + e_pos[2] * e_pos[2]))
+    point_err = float(math.sqrt(e_rot[0] * e_rot[0] + e_rot[1] * e_rot[1] + e_rot[2] * e_rot[2]))
+    return J, e, pos_err, point_err
 
 
 def solve_ik(chain: List[JointDef],
@@ -231,9 +316,22 @@ def solve_ik(chain: List[JointDef],
 
     best_q = q.copy()
     best_score = float("inf")
+    best_pos = float("inf")
+    best_point = float("inf")
 
     for _ in range(max_iter):
-        J, e = _numeric_jacobian(chain, q, P_target, d_target)
+        J, e, pos_err, point_err = _analytic_jacobian(chain, q, P_target, d_target)
+
+        score = pos_err + 0.05 * point_err
+        if score < best_score:
+            best_score = score
+            best_q = q.copy()
+            best_pos = pos_err
+            best_point = point_err
+
+        if pos_err <= pos_tol and point_err <= point_tol:
+            return q, True, pos_err, math.degrees(point_err)
+
         # DLS: dq = -J^T (J J^T + lam^2 I)^-1 e
         JJt = J @ J.T + (lam ** 2) * I6
         Jpinv = J.T @ np.linalg.inv(JJt)
@@ -251,26 +349,9 @@ def solve_ik(chain: List[JointDef],
 
         q = np.clip(q + dq, lower, upper)
 
-        p, a = tip_pose(chain, q)
-        pos_err = float(np.linalg.norm(p - P_target))
-        cos_ang = float(np.clip(np.dot(a, d_target), -1.0, 1.0))
-        point_err = math.acos(cos_ang)
-
-        score = pos_err + 0.05 * point_err
-        if score < best_score:
-            best_score = score
-            best_q = q.copy()
-
-        if pos_err <= pos_tol and point_err <= point_tol:
-            return q, True, pos_err, math.degrees(point_err)
-
-    # nao convergiu: devolve melhor tentativa
-    p, a = tip_pose(chain, best_q)
-    pos_err = float(np.linalg.norm(p - P_target))
-    cos_ang = float(np.clip(np.dot(a, d_target), -1.0, 1.0))
-    point_err = math.degrees(math.acos(cos_ang))
-    ok = pos_err <= pos_tol and math.radians(point_err) <= point_tol
-    return best_q, ok, pos_err, point_err
+    # nao convergiu: devolve melhor tentativa (erros ja conhecidos)
+    ok = best_pos <= pos_tol and best_point <= point_tol
+    return best_q, ok, best_pos, math.degrees(best_point)
 
 
 # --------------------------------------------------------------------------- #
@@ -313,15 +394,23 @@ def _solve_with_restarts(chain, P, d, seed):
     melhor solucao convergida (ou a de menor erro).
     """
     best = None
-    j1_candidates = list(np.radians(range(-175, 176, 30)))
-    # tambem inclui o seed dado primeiro (continuidade)
-    trials = [seed] + [
-        np.array([j1, *seed[1:]]) for j1 in j1_candidates
-    ]
-    for s in trials:
-        q, ok, pos_err, point_err = solve_ik(chain, P, d, s)
+    # 1) tenta primeiro o seed dado (continuidade) com iteracoes cheias: e' o
+    #    caminho que quase sempre converge -> sai cedo sem varrer nada.
+    q, ok, pos_err, point_err = solve_ik(chain, P, d, seed)
+    if ok:
+        return q, ok, pos_err, point_err
+    best = (pos_err + 0.02 * math.radians(point_err), q, ok, pos_err, point_err)
+
+    # 2) so se o seed falhar: varre j1 ao redor do azimute (anti local-minima).
+    #    Mantem a mesma cobertura de seeds (passo 30 deg) do baseline -> mesma
+    #    qualidade; max_iter menor aqui (80) corta o custo dos poucos pontos
+    #    genuinamente dificeis sem mudar onde a solucao converge.
+    j1_candidates = list(np.radians(range(-180, 180, 30)))
+    for j1 in j1_candidates:
+        s = np.array([j1, *seed[1:]])
+        q, ok, pos_err, point_err = solve_ik(chain, P, d, s, max_iter=80)
         score = pos_err + 0.02 * math.radians(point_err)
-        if best is None or score < best[0]:
+        if score < best[0]:
             best = (score, q, ok, pos_err, point_err)
         if ok:
             return q, ok, pos_err, point_err
@@ -454,9 +543,13 @@ def validate_sequence_limits(seq: List[List[float]],
 # CLI de validacao
 # --------------------------------------------------------------------------- #
 if __name__ == "__main__":
+    import time as _time
+    _t0 = _time.perf_counter()
     plan = plan_orbit()
+    _dt = _time.perf_counter() - _t0
     m = plan.metrics()
     print("=== Orbita IK ===")
+    print(f"tempo plan_orbit  : {_dt:.3f} s")
     print(f"pontos resolvidos : {m['n']}")
     print(f"convergidos       : {m['converged']}")
     print(f"<= 3 graus        : {m['frac_within_3deg'] * 100:.1f}%")
