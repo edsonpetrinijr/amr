@@ -98,6 +98,11 @@ class Dispatcher:
         self._pending_origin: Optional[str] = None
         self._pending_origin_ts: float = 0.0
 
+        # Event loop reference — set when run() starts so cross-thread callers
+        # (Flask request handlers) can schedule emits safely via
+        # asyncio.run_coroutine_threadsafe instead of asyncio.ensure_future.
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+
     # ── Setup ─────────────────────────────────────────────────────────────────
 
     def _load_stations(self) -> dict[str, Station]:
@@ -177,7 +182,7 @@ class Dispatcher:
             self._pending_origin_ts = now
             station.cb_state = CB_READY
             station.cb_dir = None
-            asyncio.ensure_future(self._emit(callbutton_msg(station)))
+            self._schedule_emit(callbutton_msg(station))
             log.info("button_pressed: origem=%s (aguardando destino)", station_id)
             return None
 
@@ -191,7 +196,7 @@ class Dispatcher:
                 if st:
                     st.cb_state = CB_CALLED
                     st.cb_dir = None
-                    asyncio.ensure_future(self._emit(callbutton_msg(st)))
+                    self._schedule_emit(callbutton_msg(st))
             log.info("button_pressed: transporte %s→%s — task %s",
                      origin_id, station_id, task.id)
         else:
@@ -201,7 +206,7 @@ class Dispatcher:
                 if st:
                     st.cb_state = CB_IDLE
                     st.cb_dir = None
-                    asyncio.ensure_future(self._emit(callbutton_msg(st)))
+                    self._schedule_emit(callbutton_msg(st))
             log.info("button_pressed: transporte %s→%s recusado (origem ocupada?)",
                      origin_id, station_id)
         return task
@@ -222,7 +227,7 @@ class Dispatcher:
                 st.cb_state = CB_IDLE
                 st.cb_dir = None
                 if emit:
-                    asyncio.ensure_future(self._emit(callbutton_msg(st)))
+                    self._schedule_emit(callbutton_msg(st))
 
     def reset_pair(self, station_id: str) -> bool:
         """Clear any pending origin and cancel an active transport touching this
@@ -238,7 +243,7 @@ class Dispatcher:
                 if st:
                     st.cb_state = CB_IDLE
                     st.cb_dir = None
-                    asyncio.ensure_future(self._emit(callbutton_msg(st)))
+                    self._schedule_emit(callbutton_msg(st))
                 cancelled = True
         log.info("reset_pair: %s resetado (cancelled=%s)", station_id, cancelled)
         return True
@@ -458,6 +463,7 @@ class Dispatcher:
     # ── Main loop ─────────────────────────────────────────────────────────────
 
     async def run(self) -> None:
+        self._loop = asyncio.get_event_loop()
         self._running = True
         log.info("dispatcher started (sim_mode=%s, tick_hz=%s)", config.SIM_MODE, config.TICK_HZ)
         last = time.monotonic()
@@ -505,7 +511,7 @@ class Dispatcher:
             task.last_progress_at = time.time()
             db.log_task_event(task, "assigned")
             log.info("assigned %s → robot %s pickup=%s drop=%s", task.id, robot.id, task.pickup, task.dropoff)
-            asyncio.ensure_future(self._emit(task_update_msg(task, "assigned")))
+            self._schedule_emit(task_update_msg(task, "assigned"))
 
     def _best_robot(self, task: Task) -> Optional[Robot]:
         pickup = self.stations.get(task.pickup)
@@ -555,13 +561,13 @@ class Dispatcher:
                     task.state = T_AT_PICKUP
                     robot.status = AT_PICKUP
                     log.info("%s at pickup %s", task.id, task.pickup)
-                    asyncio.ensure_future(self._emit(task_update_msg(task, "at_pickup")))
+                    self._schedule_emit(task_update_msg(task, "at_pickup"))
                     # Immediately head to dropoff
                     dropoff = self.stations[task.dropoff]
                     self.provider.goto(robot.id, dropoff.x, dropoff.y, task.dropoff)
                     task.state = T_ENROUTE_DROP
                     robot.status = ENROUTE_DROP
-                    asyncio.ensure_future(self._emit(task_update_msg(task, "enroute_drop")))
+                    self._schedule_emit(task_update_msg(task, "enroute_drop"))
 
             elif task.state == T_ENROUTE_DROP:
                 if self.provider.arrived(robot.id):
@@ -570,7 +576,7 @@ class Dispatcher:
                     robot.status = IDLE
                     robot.current_task = None
                     log.info("%s done", task.id)
-                    asyncio.ensure_future(self._emit(task_update_msg(task, "done")))
+                    self._schedule_emit(task_update_msg(task, "done"))
                     self._release_task(task, T_DONE)
                     self._reset_pair_stations(task.pickup, task.dropoff)
                     # Return robot to base
@@ -582,7 +588,7 @@ class Dispatcher:
             if st:
                 st.cb_state = CB_IDLE
                 st.cb_dir = None
-                asyncio.ensure_future(self._emit(callbutton_msg(st)))
+                self._schedule_emit(callbutton_msg(st))
 
     def _return_to_base(self, robot: Robot) -> None:
         base = next((s for s in self.stations.values() if s.type == "base"), None)
@@ -636,8 +642,8 @@ class Dispatcher:
             if not self._robot_healthy(robot):
                 if robot.id not in self._offline_alarmed:
                     self._offline_alarmed.add(robot.id)
-                    asyncio.ensure_future(self._emit(
-                        alarm_msg("warn", f"robot {robot.id} offline", robot.id)))
+                    self._schedule_emit(
+                        alarm_msg("warn", f"robot {robot.id} offline", robot.id))
                 self._enter_recovery(task, robot, "robot_offline")
                 continue
 
@@ -676,9 +682,9 @@ class Dispatcher:
         self._cooldown[robot.id] = time.time() + config.ROBOT_COOLDOWN_S
         task.fail_reason = reason
 
-        asyncio.ensure_future(self._emit(task_update_msg(task, "recovering")))
-        asyncio.ensure_future(self._emit(
-            alarm_msg("warn", f"{task.id} recovering: {reason}", robot.id)))
+        self._schedule_emit(task_update_msg(task, "recovering"))
+        self._schedule_emit(
+            alarm_msg("warn", f"{task.id} recovering: {reason}", robot.id))
         self._emit_loc_incident_alarm(task, robot, reason)
         log.warning("recovery: %s on robot %s — reason=%s", task.id, robot.id, reason)
 
@@ -692,16 +698,16 @@ class Dispatcher:
             task.last_x = task.last_y = None
             task.last_progress_at = None
             task.state = T_PENDING
-            asyncio.ensure_future(self._emit(task_update_msg(task, "reassigning")))
+            self._schedule_emit(task_update_msg(task, "reassigning"))
             log.info("recovery: %s re-queued (retry %d/%d)",
                      task.id, task.retries, config.MAX_TASK_RETRIES)
         else:
             self._release_task(task, T_FAILED)
-            asyncio.ensure_future(self._emit(task_update_msg(task, "failed")))
-            asyncio.ensure_future(self._emit(
+            self._schedule_emit(task_update_msg(task, "failed"))
+            self._schedule_emit(
                 alarm_msg("critical",
                           f"{task.id} failed after {task.retries} retries: {reason}",
-                          robot.id)))
+                          robot.id))
             log.error("recovery: %s FAILED after %d retries — reason=%s",
                       task.id, task.retries, reason)
 
@@ -773,12 +779,12 @@ class Dispatcher:
             "timestamp": time.time(),
             "incident_id": incident_id,
         }
-        asyncio.ensure_future(self._emit(alarm_msg(
+        self._schedule_emit(alarm_msg(
             "warn",
             f"{robot.id} needs relocalization ({enum_reason}) — task {task.id}",
             robot.id,
             payload=payload,
-        )))
+        ))
         log.warning("loc incident %s: robot=%s task=%s reason=%s",
                     incident_id, robot.id, task.id, enum_reason)
 
@@ -804,6 +810,26 @@ class Dispatcher:
         if held == task.id:
             del self._station_lock[task.pickup]
         db.log_task_event(task, final_state)
+
+    def _schedule_emit(self, msg: dict) -> None:
+        """Thread-safe emit: works whether called from inside or outside the
+        dispatcher's asyncio event loop.
+
+        - Inside the loop  (dispatcher tick thread): asyncio.ensure_future
+        - Outside the loop (Flask request threads):  run_coroutine_threadsafe
+        """
+        loop = self._loop
+        if loop is None or not loop.is_running():
+            return  # loop not up yet or already stopped — drop silently
+        try:
+            running = asyncio.get_event_loop()
+            same_loop = running is loop and loop.is_running()
+        except RuntimeError:
+            same_loop = False
+        if same_loop:
+            asyncio.ensure_future(self._emit(msg), loop=loop)
+        else:
+            asyncio.run_coroutine_threadsafe(self._emit(msg), loop)
 
     async def _emit(self, msg: dict) -> None:
         if self._broadcast:
