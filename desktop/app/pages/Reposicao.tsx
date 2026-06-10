@@ -82,9 +82,32 @@ function EmptyReturnRow({ order }: { order: ErpOrder }) {
   )
 }
 
+type DispatchMode = 'dual' | 'single' | 'unavailable' | null
+
+function DispatchModeBadge({ mode }: { mode: DispatchMode }) {
+  if (!mode) return null
+  if (mode === 'dual')
+    return (
+      <Badge variant="success" className="gap-1 font-semibold">
+        <Truck className="w-3 h-3" /><Truck className="w-3 h-3 -ml-1.5" />
+        2 AMRs prontos
+      </Badge>
+    )
+  if (mode === 'single')
+    return (
+      <Badge variant="outline" className="bg-[#d29922]/10 text-[#d29922] border-[#d29922]/40 gap-1">
+        <Truck className="w-3 h-3" />
+        1 AMR — retorno manual
+      </Badge>
+    )
+  // unavailable
+  return <Badge variant="secondary">Sem AMR disponível</Badge>
+}
+
 export function Reposicao() {
   const [orders, setOrders] = useState<ErpOrder[]>([])
   const [amrReady, setAmrReady] = useState(false)
+  const [dispatchMode, setDispatchMode] = useState<DispatchMode>(null)
   const [envioStation, setEnvioStation] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -99,6 +122,7 @@ export function Reposicao() {
       if (!aliveRef.current) return
       setOrders(res.orders ?? [])
       setAmrReady(!!res.amr_ready)
+      setDispatchMode(res.dispatch_mode ?? null)
       setEnvioStation(res.envio_station ?? '')
       setError(null)
     } catch {
@@ -144,8 +168,14 @@ export function Reposicao() {
     setConfirming(true)
     try {
       const res = await fleetApi.confirmDelivery()
-      if (res.ok) toast.success('Entrega confirmada — AMR despachado')
-      else toast.error('Nada para confirmar na fila')
+      if (res.ok) {
+        const msg = res.dispatch_mode === 'dual'
+          ? 'Entrega + retorno despachados — 2 AMRs'
+          : 'Entrega confirmada — AMR despachado'
+        toast.success(msg)
+      } else {
+        toast.error('Nada para confirmar na fila')
+      }
       await refetch()
     } catch (e) {
       const msg = e instanceof FleetApiError ? e.message : 'Backend inacessível'
@@ -159,12 +189,12 @@ export function Reposicao() {
     setRequesting(true)
     try {
       const res = await fleetApi.requestEmpty()
-      if (res.ok) toast.success('Busca de vazio solicitada — AMR a caminho')
-      else toast.error('Não foi possível solicitar vazio')
+      if (res.ok) toast.success('Retorno forçado — AMR a caminho')
+      else toast.error('Não foi possível solicitar retorno')
       await refetch()
     } catch (e) {
       const msg = e instanceof FleetApiError ? e.message : 'Backend inacessível'
-      toast.error('Falha ao buscar vazio', { description: msg })
+      toast.error('Falha ao forçar retorno', { description: msg })
     } finally {
       setRequesting(false)
     }
@@ -182,6 +212,7 @@ export function Reposicao() {
               {amrReady ? 'AMR pronto no ENVIO' : 'AMR ocupado'}
             </span>
             {envioStation && <span className="text-[#6e7681] font-mono">· {envioStation}</span>}
+            <DispatchModeBadge mode={dispatchMode} />
           </span>
         }
         actions={
@@ -192,12 +223,22 @@ export function Reposicao() {
                 : <CheckCircle2 className="w-3.5 h-3.5 mr-1" />}
               Confirmar entrega
             </Button>
-            <Button variant="outline" size="sm" disabled={requesting} onClick={handleRequestEmpty}>
-              {requesting
-                ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
-                : <RotateCcw className="w-3.5 h-3.5 mr-1" />}
-              Buscar vazio
-            </Button>
+            <span
+              title="Despacha um AMR para buscar rack vazio manualmente"
+              className="inline-flex"
+            >
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={requesting || dispatchMode === 'dual'}
+                onClick={handleRequestEmpty}
+              >
+                {requesting
+                  ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                  : <RotateCcw className="w-3.5 h-3.5 mr-1" />}
+                Forçar retorno
+              </Button>
+            </span>
           </>
         }
       />

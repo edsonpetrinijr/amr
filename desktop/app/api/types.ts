@@ -167,6 +167,8 @@ export interface ErpOrdersResponse {
   orders: ErpOrder[]
   amr_ready: boolean
   envio_station: string
+  /** Dual-AMR dispatch capability reported by the backend. */
+  dispatch_mode?: 'dual' | 'single' | 'unavailable'
 }
 
 /** POST /erp/confirm-delivery → 200 {ok, order} | 409 {ok:false, error} */
@@ -174,6 +176,10 @@ export interface ConfirmDeliveryResult {
   ok: boolean
   order?: ErpOrder
   error?: string
+  /** Which dispatch mode was used for this delivery confirmation. */
+  dispatch_mode?: 'dual' | 'single'
+  /** Empty-return order dispatched simultaneously (dual mode only). */
+  empty_order?: ErpOrder | null
 }
 
 /** POST /erp/request-empty → 200 {ok, ...job} | 409 {ok:false, error} */
