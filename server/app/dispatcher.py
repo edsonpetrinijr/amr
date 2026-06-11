@@ -65,6 +65,8 @@ class Dispatcher:
         # relocalize-assist alarm exactly once; the latch clears when the robot
         # returns to a healthy, confident, OK-localization state.
         self._loc_incidents: dict[str, str] = {}
+        # Risk A layer-0 localization detector state (observe-only).
+        self._risk_a_loc_state: dict[str, dict] = {}
 
         # Optional soak-run telemetry state machine (owns cycle_id/step).
         self.soak = None
@@ -480,6 +482,7 @@ class Dispatcher:
             self._advance_active(dt)
             self._check_recovery(dt)
             self._check_battery()
+            self._check_localization_layer0()
 
             await asyncio.sleep(TICK_INTERVAL)
 
@@ -787,6 +790,100 @@ class Dispatcher:
         ))
         log.warning("loc incident %s: robot=%s task=%s reason=%s",
                     incident_id, robot.id, task.id, enum_reason)
+
+    # ── Risk A localization Layer-0 (detection/observability only) ──────────
+
+    def _ensure_risk_a_state(self, robot_id: str, now: float) -> dict:
+        state = self._risk_a_loc_state.get(robot_id)
+        if state is None:
+            state = {
+                "state": "healthy",
+                "since_ts": now,
+                "low_since_ts": None,
+                "confidence": None,
+                "last_event": None,
+            }
+            self._risk_a_loc_state[robot_id] = state
+        return state
+
+    def _emit_localization_event(self, robot_id: str, event: str,
+                                 confidence: Optional[float], reason: str) -> None:
+        self._schedule_emit({
+            "type": "localization_event",
+            "event": event,
+            "robot_id": robot_id,
+            "ts": time.time(),
+            "confidence": confidence,
+            "reason": reason,
+        })
+
+    def _check_localization_layer0(self) -> None:
+        if not config.RISK_A_ENABLED:
+            return
+        now = time.time()
+        min_conf = config.LOC_MIN_CONFIDENCE
+        degraded_s = max(0.0, config.LOC_DEGRADED_TIMEOUT_S)
+        lost_s = max(degraded_s, config.LOC_LOST_TIMEOUT_S)
+
+        for rid in list(self.provider.robots.keys()):
+            state = self._ensure_risk_a_state(rid, now)
+            raw = self._raw_state_safe(rid)
+            conf = raw.get("confidence")
+            state["confidence"] = conf
+
+            is_low = conf is not None and conf < min_conf
+            if is_low:
+                if state["low_since_ts"] is None:
+                    state["low_since_ts"] = now
+                low_elapsed = now - float(state["low_since_ts"])
+
+                if state["state"] == "healthy" and low_elapsed >= degraded_s:
+                    state["state"] = "degraded"
+                    state["since_ts"] = now
+                    state["last_event"] = "LOCALIZATION_DEGRADED"
+                    self._emit_localization_event(
+                        rid,
+                        "LOCALIZATION_DEGRADED",
+                        conf,
+                        "confidence_below_min",
+                    )
+                elif state["state"] == "degraded" and low_elapsed >= lost_s:
+                    state["state"] = "lost"
+                    state["since_ts"] = now
+                    state["last_event"] = "LOCALIZATION_LOST"
+                    self._emit_localization_event(
+                        rid,
+                        "LOCALIZATION_LOST",
+                        conf,
+                        "confidence_below_min_persistent",
+                    )
+                continue
+
+            state["low_since_ts"] = None
+            if state["state"] in ("degraded", "lost"):
+                state["state"] = "healthy"
+                state["since_ts"] = now
+                state["last_event"] = "LOCALIZATION_RECOVERED"
+                self._emit_localization_event(
+                    rid,
+                    "LOCALIZATION_RECOVERED",
+                    conf,
+                    "confidence_recovered",
+                )
+
+    def localization_status(self) -> list[dict]:
+        now = time.time()
+        out: list[dict] = []
+        for rid in list(self.provider.robots.keys()):
+            st = self._ensure_risk_a_state(rid, now)
+            out.append({
+                "robot_id": rid,
+                "state": st["state"],
+                "since_ts": st["since_ts"],
+                "confidence": st["confidence"],
+                "last_event": st["last_event"],
+            })
+        return out
 
     # ── Battery management ────────────────────────────────────────────────────
 

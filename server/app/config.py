@@ -191,6 +191,13 @@ LOC_NAV_FAIL_TIMEOUT_S        = float(os.getenv("LOC_NAV_FAIL_TIMEOUT_S", "10.0"
 RELOCALIZE_SUCCESS_RADIUS_M   = float(os.getenv("RELOCALIZE_SUCCESS_RADIUS_M", "1.0"))  # m — seed within this of true pose → success
 RELOCALIZE_SUCCESS_THETA_DEG  = float(os.getenv("RELOCALIZE_SUCCESS_THETA_DEG", "30.0"))  # deg — heading tolerance for relocalize
 
+# ── Risk A: Layer-0 localization degradation detection (observe-only) ──────
+# Detection/alerts only — no mission-command changes in this layer.
+RISK_A_ENABLED = os.getenv("RISK_A_ENABLED", "false").lower() in ("1", "true", "yes")
+LOC_DEGRADED_TIMEOUT_S = float(os.getenv("LOC_DEGRADED_TIMEOUT_S", "2.0"))
+LOC_LOST_TIMEOUT_S = float(os.getenv("LOC_LOST_TIMEOUT_S", "6.0"))
+LOC_MIN_CONFIDENCE = float(os.getenv("LOC_MIN_CONFIDENCE", "0.5"))
+
 # ── Operator manual controls & analytics queries (single-plant pilot) ───────
 # Manual JOG safety envelope. vx/vy/w are clamped to ±MAX before being sent to
 # the robot (units match SeerProvider.send_velocity → SEER ctrl port 19205:

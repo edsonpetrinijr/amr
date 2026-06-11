@@ -436,6 +436,16 @@ def health():
     })
 
 
+@app.route("/risk-a/localization/status")
+def risk_a_localization_status():
+    if not _dispatcher:
+        return jsonify({"error": "Dispatcher not ready"}), 503
+    return jsonify({
+        "enabled": config.RISK_A_ENABLED,
+        "robots": _dispatcher.localization_status(),
+    })
+
+
 @app.route("/config/sim_mode", methods=["POST"])
 def set_sim_mode():
     """Toggle sim mode at runtime (takes effect on next backend restart)."""
