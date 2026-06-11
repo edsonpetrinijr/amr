@@ -53,8 +53,6 @@ export function CallbuttonStationRow({ station }: { station: Station }) {
     setTestResult(null)
     try {
       const res = await fleetApi.testOpcua({ station_id: station.id })
-      // Raw read value kept for debugging only — never shown to the operator.
-      console.debug('opcua test', station.id, res.node, res.value)
       setTestResult(res)
     } catch (e) {
       setTestError(e instanceof FleetApiError ? e.message : 'Falha no teste')

@@ -820,7 +820,14 @@ class Dispatcher:
         """
         loop = self._loop
         if loop is None or not loop.is_running():
-            return  # loop not up yet or already stopped — drop silently
+            # Test harnesses and early startup paths may call dispatcher logic
+            # before the background loop is running; emit sync when possible.
+            if self._broadcast and not asyncio.iscoroutinefunction(self._broadcast):
+                try:
+                    self._broadcast(msg)
+                except Exception as exc:
+                    log.warning("broadcast error: %s", exc)
+            return
         try:
             running = asyncio.get_event_loop()
             same_loop = running is loop and loop.is_running()

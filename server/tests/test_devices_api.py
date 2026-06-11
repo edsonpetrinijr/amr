@@ -254,6 +254,30 @@ def test_opcua_test_requires_node_or_station():
     assert r.status_code == 400
 
 
+def test_opcua_test_blocked_when_not_sim_mode():
+    client, _ = make_app()
+    prev = config.SIM_MODE
+    config.SIM_MODE = False
+    try:
+        r = client.post("/opcua/test", json={"node": "ns=2;s=Foo"})
+    finally:
+        config.SIM_MODE = prev
+    assert r.status_code == 403
+    assert "SIM_MODE" in (r.get_json().get("error") or "")
+
+
+def test_callbutton_simulation_blocked_when_not_sim_mode():
+    client, _ = make_app()
+    prev = config.SIM_MODE
+    config.SIM_MODE = False
+    try:
+        r = client.post("/callbutton/CB2", json={})
+    finally:
+        config.SIM_MODE = prev
+    assert r.status_code == 403
+    assert "SIM_MODE=false" in (r.get_json().get("error") or "")
+
+
 # ── Standalone runner (offline sandbox; no pytest) ────────────────────────────
 
 if __name__ == "__main__":

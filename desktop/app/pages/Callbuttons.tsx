@@ -65,14 +65,17 @@ function StationCard({
   station,
   pressing,
   lastResult,
+  simEnabled,
   onPress,
 }: {
   station: Station
   pressing: string | null
   lastResult: PressResult | null
+  simEnabled: boolean
   onPress: (id: string) => void
 }) {
   const isPressed = pressing === station.id
+  const disabled = !simEnabled || isPressed || pressing !== null
 
   return (
     <div className="rounded-xl border border-[#30363d] bg-[#161b22] p-5 flex flex-col gap-3">
@@ -85,13 +88,15 @@ function StationCard({
       </div>
 
       <button
-        disabled={isPressed || pressing !== null}
+        disabled={disabled}
         onClick={() => onPress(station.id)}
         className="flex items-center justify-center gap-2 w-full py-2.5 rounded-lg border
           border-[#30363d] text-xs font-medium transition-all active:scale-95
           text-[#e6edf3] hover:border-[#58a6ff]/60 hover:bg-[#58a6ff]/5 hover:text-[#58a6ff]
           disabled:opacity-40 disabled:cursor-not-allowed">
-        {isPressed
+        {!simEnabled
+          ? 'Simulação indisponível no modo hardware'
+          : isPressed
           ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Pressionando…</>
           : '⚡ Simular pressão'}
       </button>
@@ -107,13 +112,16 @@ function StationCard({
 function StationRow({
   station,
   pressing,
+  simEnabled,
   onPress,
 }: {
   station: Station
   pressing: string | null
+  simEnabled: boolean
   onPress: (id: string) => void
 }) {
   const isPressed = pressing === station.id
+  const disabled = !simEnabled || isPressed || pressing !== null
   return (
     <div className="flex items-center justify-between gap-4 px-4 py-3
       rounded-lg border border-[#30363d] bg-[#161b22]">
@@ -123,13 +131,13 @@ function StationRow({
         <span className="text-[10px] font-mono text-[#484f58] shrink-0">{station.id}</span>
       </div>
       <button
-        disabled={isPressed || pressing !== null}
+        disabled={disabled}
         onClick={() => onPress(station.id)}
         className="flex items-center gap-1.5 shrink-0 text-xs px-3 py-1.5 rounded-lg border
           border-[#30363d] text-[#8b949e] hover:border-[#58a6ff]/50 hover:text-[#58a6ff]
           disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-        {isPressed ? <Loader2 className="w-3 h-3 animate-spin" /> : '⚡'}
-        Simular
+        {!simEnabled ? '—' : isPressed ? <Loader2 className="w-3 h-3 animate-spin" /> : '⚡'}
+        {simEnabled ? 'Simular' : 'Hardware'}
       </button>
     </div>
   )
@@ -141,7 +149,23 @@ export function Callbuttons() {
   const [pressing, setPressing]           = useState<string | null>(null)
   const [lastResults, setLastResults]     = useState<Record<string, PressResult>>({})
   const [pendingOrigin, setPendingOrigin] = useState<string | null>(null)
+  const [simEnabled, setSimEnabled]       = useState(true)
   const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const h = await fleetApi.health() as { sim_mode?: boolean }
+        if (!cancelled && typeof h.sim_mode === 'boolean') {
+          setSimEnabled(h.sim_mode)
+        }
+      } catch {
+        // Keep conservative default for UI responsiveness when backend is unreachable.
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   // Auto-dismiss pending-origin banner after 30 s
   useEffect(() => {
@@ -159,6 +183,10 @@ export function Callbuttons() {
   const [showOthers, setShowOthers] = useState(false)
 
   async function handlePress(id: string) {
+    if (!simEnabled) {
+      toast.error('Simulação desabilitada', { description: 'Modo hardware ativo (SIM_MODE=false).' })
+      return
+    }
     setPressing(id)
     try {
       const res = await fleetApi.pressCallbutton(id) as PressResult
@@ -209,6 +237,14 @@ export function Callbuttons() {
       />
 
       {/* Pending-origin banner */}
+      {!simEnabled && (
+        <div className="mx-6 mt-4 px-4 py-3 rounded-xl border border-[#58a6ff]/30 bg-[#58a6ff]/8">
+          <span className="text-xs text-[#58a6ff]">
+            Simulação de callbutton está desabilitada no modo hardware (SIM_MODE=false).
+          </span>
+        </div>
+      )}
+
       {pendingOrigin && (
         <div className="mx-6 mt-4 flex items-center justify-between gap-4
           px-4 py-3 rounded-xl border border-[#d29922]/40 bg-[#d29922]/8">
@@ -256,6 +292,7 @@ export function Callbuttons() {
                     station={s}
                     pressing={pressing}
                     lastResult={lastResults[s.id] ?? null}
+                    simEnabled={simEnabled}
                     onPress={handlePress}
                   />
                 ))}
@@ -276,6 +313,7 @@ export function Callbuttons() {
                     station={s}
                     pressing={pressing}
                     lastResult={lastResults[s.id] ?? null}
+                    simEnabled={simEnabled}
                     onPress={handlePress}
                   />
                 ))}
@@ -300,6 +338,7 @@ export function Callbuttons() {
                       key={s.id}
                       station={s}
                       pressing={pressing}
+                      simEnabled={simEnabled}
                       onPress={handlePress}
                     />
                   ))}
@@ -321,7 +360,7 @@ export function Callbuttons() {
           )}
 
           {/* OPC UA diagnostics — only for stations with a configured node */}
-          {opcuaStations.length > 0 && (
+          {simEnabled && opcuaStations.length > 0 && (
             <section className="space-y-3 pt-2 border-t border-[#30363d]">
               <h2 className="text-xs font-semibold uppercase tracking-wider text-[#484f58]">
                 🔌 Diagnóstico OPC UA
@@ -352,7 +391,6 @@ function OpcuaTestButton({ station }: { station: Station }) {
     setResult(null)
     try {
       const res = await fleetApi.testOpcua({ station_id: station.id })
-      console.debug('opcua test', station.id, res.node, res.value)
       setResult(res)
     } catch (e) {
       setError(e instanceof FleetApiError ? e.message : 'Falha no teste')

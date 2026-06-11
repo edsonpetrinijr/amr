@@ -666,6 +666,8 @@ def opcua_test():
         return "", 204
     if not _dispatcher:
         return jsonify({"error": "Dispatcher not ready"}), 503
+    if not config.SIM_MODE:
+        return jsonify({"error": "OPC UA test endpoint is available only in SIM_MODE"}), 403
     body = request.get_json(force=True, silent=True) or {}
     node = body.get("node")
     if not node:
@@ -787,6 +789,8 @@ def callbutton_press(station_id: str):
     """
     if not _dispatcher:
         return jsonify({"error": "Dispatcher not ready"}), 503
+    if not config.SIM_MODE:
+        return jsonify({"error": "Callbutton simulation is disabled in hardware mode (SIM_MODE=false)"}), 403
     task = _dispatcher.callbutton_pressed(station_id)
     pending = _dispatcher.pending_origin
     if task is not None:

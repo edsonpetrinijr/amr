@@ -157,6 +157,22 @@ function RobotPanel({ robot, landmarks, onClose }: { robot: Robot; landmarks: La
 function StationPanel({ station, onClose }:
   { station: Station; robots: Robot[]; onClose: () => void }) {
   const [sending, setSending] = useState(false)
+  const [simEnabled, setSimEnabled] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const h = await fleetApi.health() as { sim_mode?: boolean }
+        if (!cancelled && typeof h.sim_mode === 'boolean') {
+          setSimEnabled(h.sim_mode)
+        }
+      } catch {
+        // Keep optimistic UI state if health endpoint is temporarily unavailable.
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   // NOTE: "Dispatch robot here" is hidden for the demo — see POST_DEMO_BACKLOG.md.
   // handleDispatch passed the robot id as the pickup station, producing a malformed
@@ -208,9 +224,9 @@ function StationPanel({ station, onClose }:
         </>}
       </div>
       {station.type === 'callbutton' && (
-        <Button variant="primary" size="sm" disabled={sending || station.cb_state === 'called'}
+        <Button variant="primary" size="sm" disabled={!simEnabled || sending || station.cb_state === 'called'}
           onClick={handleCallbutton}>
-          Simular acionamento
+          {simEnabled ? 'Simular acionamento' : 'Simulação indisponível no modo hardware'}
         </Button>
       )}
       {/* "Dispatch robot here" hidden for the demo — malformed task contract.
@@ -278,6 +294,12 @@ export function Field() {
     setSelectedStation(prev => prev?.id === s.id ? null : s)
   }
 
+  // Hide callbutton expansion placeholders (e.g. Linha A/B/C) from map rendering
+  // while keeping backend station data intact for configuration screens.
+  const visibleStations = stations.filter(s =>
+    s.type !== 'callbutton' || Boolean(s.seer_lm && s.seer_lm.trim())
+  )
+
   const selectedId = selectedRobot?.id ?? selectedStation?.id ?? null
 
   return (
@@ -337,7 +359,7 @@ export function Field() {
             </button>
             <span>{robots.length} robôs</span>
             <span>·</span>
-            <span>{stations.length} estações</span>
+            <span>{visibleStations.length} estações</span>
           </div>
         }
       />
@@ -355,7 +377,7 @@ export function Field() {
                 <MapCanvas3D
                   map={map}
                   robots={robots}
-                  stations={stations}
+                  stations={visibleStations}
                   robotsRef={robotsRef}
                   selectedId={selectedId}
                   onClickRobot={selectRobot}
@@ -365,7 +387,7 @@ export function Field() {
                 />
               </Suspense>
             ) : (
-              <MapCanvas map={map} robots={robots} stations={stations}
+              <MapCanvas map={map} robots={robots} stations={visibleStations}
                 laser={laserOn ? { beams: laserBeams, ts: 0 } : undefined}
                 selectedId={selectedId}
                 onClickRobot={selectRobot}
