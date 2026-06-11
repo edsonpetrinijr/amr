@@ -160,3 +160,7 @@ vite.config.ts.timestamp-*
 
 # Local reference/archive of unused SEER scripts & map exports (kept on disk, not versioned)
 context/
+
+# Local raw feed/docs used in analysis workflows (keep local, never version)
+TRANVR2.TXT
+M4_*translate_*.pdf
