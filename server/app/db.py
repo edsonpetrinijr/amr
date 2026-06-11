@@ -150,6 +150,49 @@ def query_task_history(since: float | None = None, limit: int = 500) -> list[dic
     return out[: int(limit)]
 
 
+def query_task_events(
+    since: float | None = None,
+    to_ts: float | None = None,
+    limit: int = 10000,
+) -> list[dict]:
+    """Raw task_events rows in ascending time order.
+
+    This powers read-only report endpoints that need auditable event-level
+    folding rules beyond the existing task_history summary.
+    """
+    if _conn is None:
+        return []
+
+    sql = "SELECT task_id, ts, event, robot_id, pickup, dropoff FROM task_events"
+    args: list = []
+    where: list[str] = []
+    if since is not None:
+        where.append("ts >= ?")
+        args.append(float(since))
+    if to_ts is not None:
+        where.append("ts <= ?")
+        args.append(float(to_ts))
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY ts ASC LIMIT ?"
+    args.append(int(limit))
+
+    with _lock:
+        rows = _conn.execute(sql, args).fetchall()
+
+    return [
+        {
+            "task_id": r[0],
+            "ts": r[1],
+            "event": r[2],
+            "robot_id": r[3],
+            "pickup": r[4],
+            "dropoff": r[5],
+        }
+        for r in rows
+    ]
+
+
 def task_counts_since(start_ts: float) -> dict:
     """Completed / failed counts and mean completed-task duration since start_ts."""
     if _conn is None:

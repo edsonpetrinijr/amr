@@ -44,6 +44,7 @@ from flask import Flask, Response, jsonify, request, stream_with_context
 
 from . import config, db, telemetry
 from . import store
+from . import report_v1
 from . import opcua as opcua
 from .dispatcher import Dispatcher
 from .erp import ErpService, load_mapping
@@ -1078,6 +1079,27 @@ def stats_summary():
         "avg_battery": avg_batt,
         "halted": _dispatcher.halted if _dispatcher else False,
     })
+
+
+@app.route("/report/v1/summary")
+def report_v1_summary():
+    from_raw = request.args.get("from_ts")
+    to_raw = request.args.get("to_ts")
+    limit_raw = request.args.get("limit")
+
+    try:
+        from_ts = float(from_raw) if from_raw not in (None, "") else None
+        to_ts = float(to_raw) if to_raw not in (None, "") else None
+        limit = int(limit_raw) if limit_raw not in (None, "") else 10000
+    except (TypeError, ValueError):
+        return jsonify({"error": "invalid query params: from_ts/to_ts must be float; limit must be int"}), 400
+
+    try:
+        payload = report_v1.build_summary(from_ts=from_ts, to_ts=to_ts, limit=limit)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify(payload)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
